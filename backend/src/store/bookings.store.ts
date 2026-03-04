@@ -2,7 +2,6 @@ import { Booking } from "../types/booking";
 
 let nextId = 1;
 
-// Seed data so GET endpoints return something immediately.
 const bookings: Booking[] = [
   {
     id: nextId++,
@@ -16,18 +15,6 @@ const bookings: Booking[] = [
     status: "BOOKING_PENDING",
     createdAt: new Date().toISOString(),
   },
-  {
-    id: nextId++,
-    site: "Site B",
-    reg: "XY98ZTR",
-    agreementRef: "AGR-002",
-    make: "Ford",
-    model: "Fiesta",
-    colour: "Blue",
-    dispatchDate: null,
-    status: "READY_TO_COLLECT",
-    createdAt: new Date().toISOString(),
-  },
 ];
 
 export const bookingsStore = {
@@ -37,5 +24,16 @@ export const bookingsStore = {
 
   getById(id: number): Booking | undefined {
     return bookings.find((b) => b.id === id);
+  },
+
+  create(data: Omit<Booking, "id" | "createdAt">): Booking {
+    const newBooking: Booking = {
+      id: nextId++,
+      createdAt: new Date().toISOString(),
+      ...data,
+    };
+
+    bookings.push(newBooking);
+    return newBooking;
   },
 };

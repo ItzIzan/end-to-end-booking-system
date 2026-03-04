@@ -22,3 +22,24 @@ export const getBookingById = (req: Request, res: Response) => {
 
   return res.json(booking);
 };
+
+export const createBooking = (req: Request, res: Response) => {
+  const { site, reg, agreementRef, make, model, colour } = req.body;
+
+  if (!site || !reg || !agreementRef || !make || !model || !colour) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  const booking = bookingsStore.create({
+    site,
+    reg,
+    agreementRef,
+    make,
+    model,
+    colour,
+    dispatchDate: null,
+    status: "BOOKING_PENDING"
+  });
+
+  return res.status(201).json(booking);
+};
