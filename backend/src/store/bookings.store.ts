@@ -49,4 +49,11 @@ export const bookingsStore = {
 
   return booking;
 },
+deleteById(id: number): boolean {
+  const index = bookings.findIndex((b) => b.id === id);
+  if (index === -1) return false;
+
+  bookings.splice(index, 1);
+  return true;
+},
 };

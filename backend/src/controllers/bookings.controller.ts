@@ -93,3 +93,19 @@ export const updateBooking = (req: Request, res: Response) => {
 
   return res.json(updated);
 };
+export const deleteBooking = (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const deleted = bookingsStore.deleteById(id);
+
+  if (!deleted) {
+    return res.status(404).json({ error: "Booking not found" });
+  }
+
+  // 204 = success, no response body
+  return res.status(204).send();
+};
