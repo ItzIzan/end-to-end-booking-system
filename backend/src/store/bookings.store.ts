@@ -36,4 +36,17 @@ export const bookingsStore = {
     bookings.push(newBooking);
     return newBooking;
   },
+
+  updateById(
+  id: number,
+  updates: Partial<Pick<Booking, "status" | "dispatchDate">>
+): Booking | undefined {
+  const booking = bookings.find((b) => b.id === id);
+  if (!booking) return undefined;
+
+  if (updates.status !== undefined) booking.status = updates.status;
+  if (updates.dispatchDate !== undefined) booking.dispatchDate = updates.dispatchDate;
+
+  return booking;
+},
 };
