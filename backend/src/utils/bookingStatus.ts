@@ -9,3 +9,16 @@ const validTransitions: Record<BookingStatus, BookingStatus[]> = {
   IN_TRANSIT: ["RELEASED"],
   RELEASED: []
 };
+
+export function isValidStatusTransition(
+  currentStatus: BookingStatus,
+  nextStatus: BookingStatus
+): boolean {
+  if (currentStatus === nextStatus) {
+    return true;
+  }
+
+  const allowedNextStatuses = validTransitions[currentStatus];
+
+  return allowedNextStatuses.includes(nextStatus);
+}

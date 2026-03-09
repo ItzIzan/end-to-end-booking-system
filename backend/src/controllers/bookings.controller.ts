@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { bookingsStore } from "../store/bookings.store";
 import { BookingStatus } from "../types/booking";
+import { isValidStatusTransition } from "../utils/bookingStatus";
 
 export const getBookings = (_req: Request, res: Response) => {
   const bookings = bookingsStore.getAll();
@@ -83,6 +84,20 @@ export const updateBooking = (req: Request, res: Response) => {
     if (!isValid) {
       return res.status(400).json({ error: "dispatchDate must be YYYY-MM-DD or null" });
     }
+  }
+  const booking = bookingsStore.getById(id);
+  if (!booking) {
+  return res.status(404).json({ error: "Booking not found" });
+  }
+  
+  if (status !== undefined) {
+  const valid = isValidStatusTransition(booking.status, status);
+
+  if (!valid) {
+    return res.status(400).json({
+      error: `Invalid status transition from ${booking.status} to ${status}`,
+    });
+  }
   }
 
   const updated = bookingsStore.updateById(id, { status, dispatchDate });
