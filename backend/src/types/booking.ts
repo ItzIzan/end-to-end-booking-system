@@ -19,3 +19,15 @@ export interface Booking {
   status: BookingStatus;
   createdAt: string; // ISO timestamp
 }
+
+export type BookingFilters = {
+  id?: number;
+  site?: string;
+  reg?: string;
+  agreementRef?: string;
+  make?: string;
+  model?: string;
+  colour?: string;
+  dispatchDate?: string | null;
+  status?: BookingStatus;
+};

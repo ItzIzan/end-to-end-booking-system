@@ -1,4 +1,4 @@
-import { Booking } from "../types/booking";
+import type { Booking, BookingFilters } from "../types/booking";
 
 let nextId = 1;
 
@@ -18,13 +18,36 @@ const bookings: Booking[] = [
 ];
 
 export const bookingsStore = {
-  getAll(): Booking[] {
-    return bookings;
-  },
+  getAll(filters?: BookingFilters): Booking[] {
+    let result = [...bookings];
 
-  getById(id: number): Booking | undefined {
-    return bookings.find((b) => b.id === id);
-  },
+  if (!filters) {
+    return result;
+  }
+
+  const entries = Object.entries(filters) as [
+    keyof BookingFilters,
+    BookingFilters[keyof BookingFilters]
+  ][];
+
+  for (const [key, value] of entries) {
+    if (value === undefined) {
+      continue;
+    }
+
+    result = result.filter((booking) => {
+      const bookingValue = booking[key];
+
+      if (typeof bookingValue === "string" && typeof value === "string") {
+        return bookingValue.toLowerCase() === value.toLowerCase();
+      }
+
+      return bookingValue === value;
+    });
+  }
+
+  return result;
+},
 
   create(data: Omit<Booking, "id" | "createdAt">): Booking {
     const newBooking: Booking = {
