@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { bookingsStore } from "../store/bookings.store";
-import { BookingStatus, BookingFilters } from "../types/booking";
+import type { BookingStatus, BookingFilters } from "../types/booking";
 import { isValidStatusTransition } from "../utils/bookingStatus";
 
 export const getBookings = (req: Request, res: Response) => {
@@ -93,9 +93,9 @@ export const getBookingById = (req: Request, res: Response) => {
 };
 
 export const createBooking = (req: Request, res: Response) => {
-  const { site, reg, agreementRef, make, model, colour } = req.body;
+  const { site, reg, agreementRef, make, model, colour, customerName } = req.body;
 
-  if (!site || !reg || !agreementRef || !make || !model || !colour) {
+  if (!site || !reg || !agreementRef || !make || !model || !colour || !customerName) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
@@ -106,8 +106,13 @@ export const createBooking = (req: Request, res: Response) => {
     make,
     model,
     colour,
+    customerName,
     dispatchDate: null,
-    status: "BOOKING_PENDING"
+    status: "BOOKING_PENDING",
+    lastCounteredBy: null,
+    assignedDriverName: null,
+    driverDelivered: false,
+    endUserDelivered: false,
   });
 
   return res.status(201).json(booking);

@@ -1,3 +1,5 @@
+import type { UserRole } from "./user";
+
 export type BookingStatus =
   | "BOOKING_PENDING"
   | "BOOKING_COUNTER"
@@ -15,9 +17,14 @@ export interface Booking {
   make: string;
   model: string;
   colour: string;
-  dispatchDate: string | null; // ISO date string later, null until set
+  dispatchDate: string | null;
   status: BookingStatus;
-  createdAt: string; // ISO timestamp
+  createdAt: string;
+  customerName: string;
+  lastCounteredBy: Extract<UserRole, "CUSTOMER" | "DRIVER_ADMIN"> | null;
+  assignedDriverName: string | null;
+  driverDelivered: boolean;
+  endUserDelivered: boolean;
 }
 
 export type BookingFilters = {

@@ -14,6 +14,11 @@ const bookings: Booking[] = [
     dispatchDate: null,
     status: "BOOKING_PENDING",
     createdAt: new Date().toISOString(),
+    customerName: "John Smith",
+    lastCounteredBy: null,
+    assignedDriverName: null,
+    driverDelivered: false,
+    endUserDelivered: false,
   },
 ];
 
@@ -66,20 +71,40 @@ export const bookingsStore = {
 
   updateById(
     id: number,
-    updates: Partial<Pick<Booking, "status" | "dispatchDate">>
+    updates: Partial<
+      Pick<
+        Booking,
+        | "status"
+        | "dispatchDate"
+        | "lastCounteredBy"
+        | "assignedDriverName"
+        | "driverDelivered"
+        | "endUserDelivered"
+      >
+    >
   ): Booking | undefined {
     const booking = bookings.find((b) => b.id === id);
-    if (!booking) return undefined;
+
+    if (!booking) {
+      return undefined;
+    }
 
     if (updates.status !== undefined) booking.status = updates.status;
     if (updates.dispatchDate !== undefined) booking.dispatchDate = updates.dispatchDate;
+    if (updates.lastCounteredBy !== undefined) booking.lastCounteredBy = updates.lastCounteredBy;
+    if (updates.assignedDriverName !== undefined) booking.assignedDriverName = updates.assignedDriverName;
+    if (updates.driverDelivered !== undefined) booking.driverDelivered = updates.driverDelivered;
+    if (updates.endUserDelivered !== undefined) booking.endUserDelivered = updates.endUserDelivered;
 
     return booking;
   },
 
   deleteById(id: number): boolean {
     const index = bookings.findIndex((b) => b.id === id);
-    if (index === -1) return false;
+
+    if (index === -1) {
+      return false;
+    }
 
     bookings.splice(index, 1);
     return true;
