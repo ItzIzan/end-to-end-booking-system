@@ -89,12 +89,29 @@ export const bookingsStore = {
       return undefined;
     }
 
-    if (updates.status !== undefined) booking.status = updates.status;
-    if (updates.dispatchDate !== undefined) booking.dispatchDate = updates.dispatchDate;
-    if (updates.lastCounteredBy !== undefined) booking.lastCounteredBy = updates.lastCounteredBy;
-    if (updates.assignedDriverName !== undefined) booking.assignedDriverName = updates.assignedDriverName;
-    if (updates.driverDelivered !== undefined) booking.driverDelivered = updates.driverDelivered;
-    if (updates.endUserDelivered !== undefined) booking.endUserDelivered = updates.endUserDelivered;
+    if (updates.status !== undefined) {
+      booking.status = updates.status;
+    }
+
+    if (updates.dispatchDate !== undefined) {
+      booking.dispatchDate = updates.dispatchDate;
+    }
+
+    if (updates.lastCounteredBy !== undefined) {
+      booking.lastCounteredBy = updates.lastCounteredBy;
+    }
+
+    if (updates.assignedDriverName !== undefined) {
+      booking.assignedDriverName = updates.assignedDriverName;
+    }
+
+    if (updates.driverDelivered !== undefined) {
+      booking.driverDelivered = updates.driverDelivered;
+    }
+
+    if (updates.endUserDelivered !== undefined) {
+      booking.endUserDelivered = updates.endUserDelivered;
+    }
 
     return booking;
   },

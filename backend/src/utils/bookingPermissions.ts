@@ -90,3 +90,25 @@ export function canRoleMakeTransition(
 
   return { allowed: true };
 }
+
+export function requireRole(
+  role: UserRole | null,
+  allowedRoles: UserRole[]
+): { allowed: boolean; reason?: string } {
+  if (!role) {
+    return {
+      allowed: false,
+      reason:
+        "Missing or invalid x-user-role header. Allowed roles: CUSTOMER, DRIVER_ADMIN, OPS_ADMIN, SECURITY, DRIVER, END_USER",
+    };
+  }
+
+  if (!allowedRoles.includes(role)) {
+    return {
+      allowed: false,
+      reason: `Role ${role} is not allowed to perform this action`,
+    };
+  }
+
+  return { allowed: true };
+}

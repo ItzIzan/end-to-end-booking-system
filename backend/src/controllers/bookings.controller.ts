@@ -2,6 +2,21 @@ import { Request, Response } from "express";
 import { bookingsStore } from "../store/bookings.store";
 import type { BookingStatus, BookingFilters } from "../types/booking";
 import { isValidStatusTransition } from "../utils/bookingStatus";
+import {
+  canRoleMakeTransition,
+  getRoleFromHeader,
+  requireRole,
+} from "../utils/bookingPermissions";
+
+const ALLOWED_STATUSES: BookingStatus[] = [
+  "BOOKING_PENDING",
+  "BOOKING_COUNTER",
+  "BOOKING_CONFIRMED",
+  "READY_TO_COLLECT",
+  "COLLECTED",
+  "IN_TRANSIT",
+  "RELEASED",
+];
 
 export const getBookings = (req: Request, res: Response) => {
   const {
@@ -40,11 +55,13 @@ export const getBookings = (req: Request, res: Response) => {
 
     if (parsedDispatchDate !== "null") {
       const isValid = /^\d{4}-\d{2}-\d{2}$/.test(parsedDispatchDate);
+
       if (!isValid) {
         return res.status(400).json({
           error: "dispatchDate must be YYYY-MM-DD or null",
         });
       }
+
       filters.dispatchDate = parsedDispatchDate;
     } else {
       filters.dispatchDate = null;
@@ -54,17 +71,7 @@ export const getBookings = (req: Request, res: Response) => {
   if (status !== undefined) {
     const parsedStatus = String(status) as BookingStatus;
 
-    const allowedStatuses: BookingStatus[] = [
-      "BOOKING_PENDING",
-      "BOOKING_COUNTER",
-      "BOOKING_CONFIRMED",
-      "READY_TO_COLLECT",
-      "COLLECTED",
-      "IN_TRANSIT",
-      "RELEASED",
-    ];
-
-    if (!allowedStatuses.includes(parsedStatus)) {
+    if (!ALLOWED_STATUSES.includes(parsedStatus)) {
       return res.status(400).json({ error: "Invalid status" });
     }
 
@@ -78,7 +85,6 @@ export const getBookings = (req: Request, res: Response) => {
 export const getBookingById = (req: Request, res: Response) => {
   const id = Number(req.params.id);
 
-  // Basic validation
   if (Number.isNaN(id)) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
@@ -120,6 +126,7 @@ export const createBooking = (req: Request, res: Response) => {
 
 export const updateBooking = (req: Request, res: Response) => {
   const id = Number(req.params.id);
+
   if (Number.isNaN(id)) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
@@ -129,50 +136,59 @@ export const updateBooking = (req: Request, res: Response) => {
     dispatchDate?: string | null;
   };
 
-  // Must provide at least one field
   if (status === undefined && dispatchDate === undefined) {
     return res.status(400).json({ error: "Provide status and/or dispatchDate" });
   }
 
-  // Validate status if provided
-  const allowedStatuses: BookingStatus[] = [
-    "BOOKING_PENDING",
-    "BOOKING_COUNTER",
-    "BOOKING_CONFIRMED",
-    "READY_TO_COLLECT",
-    "COLLECTED",
-    "IN_TRANSIT",
-    "RELEASED",
-  ];
-
-  if (status !== undefined && !allowedStatuses.includes(status)) {
+  if (status !== undefined && !ALLOWED_STATUSES.includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
   }
 
-  // (Light) validate dispatchDate format if provided and not null
   if (dispatchDate !== undefined && dispatchDate !== null) {
-    // Accept YYYY-MM-DD for now (simple)
     const isValid = /^\d{4}-\d{2}-\d{2}$/.test(dispatchDate);
+
     if (!isValid) {
       return res.status(400).json({ error: "dispatchDate must be YYYY-MM-DD or null" });
     }
   }
+
   const booking = bookingsStore.getById(id);
+
   if (!booking) {
-  return res.status(404).json({ error: "Booking not found" });
+    return res.status(404).json({ error: "Booking not found" });
   }
-  
+
   if (status !== undefined) {
-  const valid = isValidStatusTransition(booking.status, status);
+    const role = getRoleFromHeader(req.header("x-user-role"));
 
-  if (!valid) {
-    return res.status(400).json({
-      error: `Invalid status transition from ${booking.status} to ${status}`,
-    });
-  }
+    if (!role) {
+      return res.status(400).json({
+        error:
+          "Missing or invalid x-user-role header. Allowed roles: CUSTOMER, DRIVER_ADMIN, OPS_ADMIN, SECURITY, DRIVER, END_USER",
+      });
+    }
+
+    const validTransition = isValidStatusTransition(booking.status, status);
+
+    if (!validTransition) {
+      return res.status(400).json({
+        error: `Invalid status transition from ${booking.status} to ${status}`,
+      });
+    }
+
+    const permissionCheck = canRoleMakeTransition(role, booking, status);
+
+    if (!permissionCheck.allowed) {
+      return res.status(403).json({
+        error: permissionCheck.reason ?? "You are not allowed to make this status change",
+      });
+    }
   }
 
-  const updated = bookingsStore.updateById(id, { status, dispatchDate });
+  const updated = bookingsStore.updateById(id, {
+    status,
+    dispatchDate,
+  });
 
   if (!updated) {
     return res.status(404).json({ error: "Booking not found" });
@@ -180,6 +196,146 @@ export const updateBooking = (req: Request, res: Response) => {
 
   return res.json(updated);
 };
+
+export const assignDriver = (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRoleFromHeader(req.header("x-user-role"));
+  const roleCheck = requireRole(role, ["DRIVER_ADMIN"]);
+
+  if (!roleCheck.allowed) {
+    return res.status(role ? 403 : 400).json({
+      error: roleCheck.reason,
+    });
+  }
+
+  const { assignedDriverName } = req.body as {
+    assignedDriverName?: string;
+  };
+
+  if (!assignedDriverName || !assignedDriverName.trim()) {
+    return res.status(400).json({
+      error: "assignedDriverName is required",
+    });
+  }
+
+  const booking = bookingsStore.getById(id);
+
+  if (!booking) {
+    return res.status(404).json({ error: "Booking not found" });
+  }
+
+  if (booking.status !== "BOOKING_CONFIRMED" && booking.status !== "READY_TO_COLLECT") {
+    return res.status(400).json({
+      error: "Driver can only be assigned when booking is BOOKING_CONFIRMED or READY_TO_COLLECT",
+    });
+  }
+
+  const updated = bookingsStore.updateById(id, {
+    assignedDriverName: assignedDriverName.trim(),
+  });
+
+  return res.json(updated);
+};
+
+export const confirmDriverDelivered = (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRoleFromHeader(req.header("x-user-role"));
+  const roleCheck = requireRole(role, ["DRIVER"]);
+
+  if (!roleCheck.allowed) {
+    return res.status(role ? 403 : 400).json({
+      error: roleCheck.reason,
+    });
+  }
+
+  const booking = bookingsStore.getById(id);
+
+  if (!booking) {
+    return res.status(404).json({ error: "Booking not found" });
+  }
+
+  if (booking.status !== "IN_TRANSIT") {
+    return res.status(400).json({
+      error: "Driver delivery can only be confirmed when booking is IN_TRANSIT",
+    });
+  }
+
+  if (!booking.assignedDriverName) {
+    return res.status(400).json({
+      error: "Cannot confirm driver delivery before a driver has been assigned",
+    });
+  }
+
+  if (booking.driverDelivered) {
+    return res.status(400).json({
+      error: "Driver delivery has already been confirmed",
+    });
+  }
+
+  const updated = bookingsStore.updateById(id, {
+    driverDelivered: true,
+  });
+
+  return res.json(updated);
+};
+
+export const confirmEndUserDelivered = (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRoleFromHeader(req.header("x-user-role"));
+  const roleCheck = requireRole(role, ["END_USER"]);
+
+  if (!roleCheck.allowed) {
+    return res.status(role ? 403 : 400).json({
+      error: roleCheck.reason,
+    });
+  }
+
+  const booking = bookingsStore.getById(id);
+
+  if (!booking) {
+    return res.status(404).json({ error: "Booking not found" });
+  }
+
+  if (booking.status !== "IN_TRANSIT") {
+    return res.status(400).json({
+      error: "End user delivery can only be confirmed when booking is IN_TRANSIT",
+    });
+  }
+
+  if (!booking.driverDelivered) {
+    return res.status(400).json({
+      error: "End user delivery cannot be confirmed before driver delivery is confirmed",
+    });
+  }
+
+  if (booking.endUserDelivered) {
+    return res.status(400).json({
+      error: "End user delivery has already been confirmed",
+    });
+  }
+
+  const updated = bookingsStore.updateById(id, {
+    endUserDelivered: true,
+  });
+
+  return res.json(updated);
+};
+
 export const deleteBooking = (req: Request, res: Response) => {
   const id = Number(req.params.id);
 
@@ -193,6 +349,5 @@ export const deleteBooking = (req: Request, res: Response) => {
     return res.status(404).json({ error: "Booking not found" });
   }
 
-  // 204 = success, no response body
   return res.status(204).send();
 };
