@@ -1,9 +1,13 @@
 import { Request, Response } from "express";
 import { bookingsStore } from "../store/bookings.store";
-import type { BookingStatus, BookingFilters } from "../types/booking";
-import { isValidStatusTransition } from "../utils/bookingStatus";
+import type { Booking, BookingFilters, BookingStatus } from "../types/booking";
 import {
-  canRoleMakeTransition,
+  canComplete,
+  canConfirmBooking,
+  canDispatch,
+  canMarkReady,
+  canReleaseFromSite,
+  canStartTransit,
   getRoleFromHeader,
   requireRole,
 } from "../utils/bookingPermissions";
@@ -13,12 +17,65 @@ const ALLOWED_STATUSES: BookingStatus[] = [
   "BOOKING_COUNTER",
   "BOOKING_CONFIRMED",
   "READY_TO_COLLECT",
-  "COLLECTED",
+  "SITE_RELEASED",
+  "ADMIN_DISPATCHED",
   "IN_TRANSIT",
-  "RELEASED",
+  "COMPLETED",
 ];
 
-export const getBookings = (req: Request, res: Response) => {
+function parseBookingId(req: Request): number | null {
+  const id = Number(req.params.id);
+  return Number.isNaN(id) ? null : id;
+}
+
+async function getBookingOr404(
+  id: number,
+  res: Response
+): Promise<Booking | null> {
+  const booking = await bookingsStore.getById(id);
+
+  if (!booking) {
+    res.status(404).json({ error: "Booking not found" });
+    return null;
+  }
+
+  return booking;
+}
+
+function getRequestRole(req: Request) {
+  return getRoleFromHeader(req.header("x-user-role"));
+}
+
+function handleRoleCheck(
+  res: Response,
+  role: ReturnType<typeof getRoleFromHeader>,
+  allowedRoles: Parameters<typeof requireRole>[1]
+): boolean {
+  const roleCheck = requireRole(role, allowedRoles);
+
+  if (!roleCheck.allowed) {
+    res.status(role ? 403 : 400).json({
+      error: roleCheck.reason,
+    });
+    return false;
+  }
+
+  return true;
+}
+
+async function updateStatusAndRespond(
+  res: Response,
+  bookingId: number,
+  nextStatus: BookingStatus
+) {
+  const updated = await bookingsStore.updateById(bookingId, {
+    status: nextStatus,
+  });
+
+  return res.json(updated);
+}
+
+export const getBookings = async (req: Request, res: Response) => {
   const {
     id,
     site,
@@ -78,34 +135,41 @@ export const getBookings = (req: Request, res: Response) => {
     filters.status = parsedStatus;
   }
 
-  const bookings = bookingsStore.getAll(filters);
+  const bookings = await bookingsStore.getAll(filters);
   return res.json(bookings);
 };
 
-export const getBookingById = (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+export const getBookingById = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
 
-  if (Number.isNaN(id)) {
+  if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
 
-  const booking = bookingsStore.getById(id);
+  const booking = await getBookingOr404(id, res);
 
-  if (!booking) {
-    return res.status(404).json({ error: "Booking not found" });
-  }
+  if (!booking) return;
 
   return res.json(booking);
 };
 
-export const createBooking = (req: Request, res: Response) => {
-  const { site, reg, agreementRef, make, model, colour, customerName } = req.body;
+export const createBooking = async (req: Request, res: Response) => {
+  const { site, reg, agreementRef, make, model, colour, customerName } =
+    req.body;
 
-  if (!site || !reg || !agreementRef || !make || !model || !colour || !customerName) {
+  if (
+    !site ||
+    !reg ||
+    !agreementRef ||
+    !make ||
+    !model ||
+    !colour ||
+    !customerName
+  ) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  const booking = bookingsStore.create({
+  const booking = await bookingsStore.create({
     site,
     reg,
     agreementRef,
@@ -124,94 +188,83 @@ export const createBooking = (req: Request, res: Response) => {
   return res.status(201).json(booking);
 };
 
-export const updateBooking = (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+export const updateBooking = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
 
-  if (Number.isNaN(id)) {
+  if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
 
-  const { status, dispatchDate } = req.body as {
-    status?: BookingStatus;
+  const { dispatchDate } = req.body as {
     dispatchDate?: string | null;
   };
 
-  if (status === undefined && dispatchDate === undefined) {
-    return res.status(400).json({ error: "Provide status and/or dispatchDate" });
+  if (dispatchDate === undefined) {
+    return res.status(400).json({
+      error:
+        "PATCH /bookings/:id only supports dispatchDate updates. Use action endpoints for workflow changes.",
+    });
   }
 
-  if (status !== undefined && !ALLOWED_STATUSES.includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-
-  if (dispatchDate !== undefined && dispatchDate !== null) {
+  if (dispatchDate !== null) {
     const isValid = /^\d{4}-\d{2}-\d{2}$/.test(dispatchDate);
 
     if (!isValid) {
-      return res.status(400).json({ error: "dispatchDate must be YYYY-MM-DD or null" });
-    }
-  }
-
-  const booking = bookingsStore.getById(id);
-
-  if (!booking) {
-    return res.status(404).json({ error: "Booking not found" });
-  }
-
-  if (status !== undefined) {
-    const role = getRoleFromHeader(req.header("x-user-role"));
-
-    if (!role) {
       return res.status(400).json({
-        error:
-          "Missing or invalid x-user-role header. Allowed roles: CUSTOMER, DRIVER_ADMIN, OPS_ADMIN, SECURITY, DRIVER, END_USER",
-      });
-    }
-
-    const validTransition = isValidStatusTransition(booking.status, status);
-
-    if (!validTransition) {
-      return res.status(400).json({
-        error: `Invalid status transition from ${booking.status} to ${status}`,
-      });
-    }
-
-    const permissionCheck = canRoleMakeTransition(role, booking, status);
-
-    if (!permissionCheck.allowed) {
-      return res.status(403).json({
-        error: permissionCheck.reason ?? "You are not allowed to make this status change",
+        error: "dispatchDate must be YYYY-MM-DD or null",
       });
     }
   }
 
-  const updated = bookingsStore.updateById(id, {
-    status,
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const updated = await bookingsStore.updateById(id, {
     dispatchDate,
   });
-
-  if (!updated) {
-    return res.status(404).json({ error: "Booking not found" });
-  }
 
   return res.json(updated);
 };
 
-export const assignDriver = (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+export const confirmBooking = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
 
-  if (Number.isNaN(id)) {
+  if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
 
-  const role = getRoleFromHeader(req.header("x-user-role"));
-  const roleCheck = requireRole(role, ["DRIVER_ADMIN"]);
+  const role = getRequestRole(req);
 
-  if (!roleCheck.allowed) {
-    return res.status(role ? 403 : 400).json({
-      error: roleCheck.reason,
-    });
+  if (!handleRoleCheck(res, role, ["CUSTOMER", "TRANSPORT_ADMIN"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const permissionCheck = canConfirmBooking(role!, booking);
+
+  if (!permissionCheck.allowed) {
+    return res.status(403).json({ error: permissionCheck.reason });
   }
+
+  const updated = await bookingsStore.updateById(id, {
+    status: "BOOKING_CONFIRMED",
+  });
+
+  return res.json(updated);
+};
+
+export const assignDriver = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRequestRole(req);
+
+  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
 
   const { assignedDriverName } = req.body as {
     assignedDriverName?: string;
@@ -223,46 +276,138 @@ export const assignDriver = (req: Request, res: Response) => {
     });
   }
 
-  const booking = bookingsStore.getById(id);
+  const booking = await getBookingOr404(id, res);
 
-  if (!booking) {
-    return res.status(404).json({ error: "Booking not found" });
-  }
+  if (!booking) return;
 
-  if (booking.status !== "BOOKING_CONFIRMED" && booking.status !== "READY_TO_COLLECT") {
+  if (
+    booking.status !== "BOOKING_CONFIRMED" &&
+    booking.status !== "READY_TO_COLLECT" &&
+    booking.status !== "SITE_RELEASED"
+  ) {
     return res.status(400).json({
-      error: "Driver can only be assigned when booking is BOOKING_CONFIRMED or READY_TO_COLLECT",
+      error:
+        "Driver can only be assigned when booking is BOOKING_CONFIRMED, READY_TO_COLLECT or SITE_RELEASED",
     });
   }
 
-  const updated = bookingsStore.updateById(id, {
+  const updated = await bookingsStore.updateById(id, {
     assignedDriverName: assignedDriverName.trim(),
   });
 
   return res.json(updated);
 };
 
-export const confirmDriverDelivered = (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+export const markReady = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
 
-  if (Number.isNaN(id)) {
+  if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
 
-  const role = getRoleFromHeader(req.header("x-user-role"));
-  const roleCheck = requireRole(role, ["DRIVER"]);
+  const role = getRequestRole(req);
 
-  if (!roleCheck.allowed) {
-    return res.status(role ? 403 : 400).json({
-      error: roleCheck.reason,
-    });
+  if (!handleRoleCheck(res, role, ["OPS_ADMIN"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const permissionCheck = canMarkReady(role!, booking);
+
+  if (!permissionCheck.allowed) {
+    return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  const booking = bookingsStore.getById(id);
+  return updateStatusAndRespond(res, id, "READY_TO_COLLECT");
+};
 
-  if (!booking) {
-    return res.status(404).json({ error: "Booking not found" });
+export const releaseFromSite = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
   }
+
+  const role = getRequestRole(req);
+
+  if (!handleRoleCheck(res, role, ["SECURITY"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const permissionCheck = canReleaseFromSite(role!, booking);
+
+  if (!permissionCheck.allowed) {
+    return res.status(403).json({ error: permissionCheck.reason });
+  }
+
+  return updateStatusAndRespond(res, id, "SITE_RELEASED");
+};
+
+export const dispatchBooking = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRequestRole(req);
+
+  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const permissionCheck = canDispatch(role!, booking);
+
+  if (!permissionCheck.allowed) {
+    return res.status(403).json({ error: permissionCheck.reason });
+  }
+
+  return updateStatusAndRespond(res, id, "ADMIN_DISPATCHED");
+};
+
+export const startTransit = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRequestRole(req);
+
+  if (!handleRoleCheck(res, role, ["DRIVER"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const permissionCheck = canStartTransit(role!, booking);
+
+  if (!permissionCheck.allowed) {
+    return res.status(403).json({ error: permissionCheck.reason });
+  }
+
+  return updateStatusAndRespond(res, id, "IN_TRANSIT");
+};
+
+export const confirmDriverDelivered = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const role = getRequestRole(req);
+
+  if (!handleRoleCheck(res, role, ["DRIVER"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
 
   if (booking.status !== "IN_TRANSIT") {
     return res.status(400).json({
@@ -282,34 +427,30 @@ export const confirmDriverDelivered = (req: Request, res: Response) => {
     });
   }
 
-  const updated = bookingsStore.updateById(id, {
+  const updated = await bookingsStore.updateById(id, {
     driverDelivered: true,
   });
 
   return res.json(updated);
 };
 
-export const confirmEndUserDelivered = (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+export const confirmEndUserDelivered = async (
+  req: Request,
+  res: Response
+) => {
+  const id = parseBookingId(req);
 
-  if (Number.isNaN(id)) {
+  if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
 
-  const role = getRoleFromHeader(req.header("x-user-role"));
-  const roleCheck = requireRole(role, ["END_USER"]);
+  const role = getRequestRole(req);
 
-  if (!roleCheck.allowed) {
-    return res.status(role ? 403 : 400).json({
-      error: roleCheck.reason,
-    });
-  }
+  if (!handleRoleCheck(res, role, ["END_USER"])) return;
 
-  const booking = bookingsStore.getById(id);
+  const booking = await getBookingOr404(id, res);
 
-  if (!booking) {
-    return res.status(404).json({ error: "Booking not found" });
-  }
+  if (!booking) return;
 
   if (booking.status !== "IN_TRANSIT") {
     return res.status(400).json({
@@ -319,7 +460,8 @@ export const confirmEndUserDelivered = (req: Request, res: Response) => {
 
   if (!booking.driverDelivered) {
     return res.status(400).json({
-      error: "End user delivery cannot be confirmed before driver delivery is confirmed",
+      error:
+        "End user delivery cannot be confirmed before driver delivery is confirmed",
     });
   }
 
@@ -329,21 +471,45 @@ export const confirmEndUserDelivered = (req: Request, res: Response) => {
     });
   }
 
-  const updated = bookingsStore.updateById(id, {
+  const updated = await bookingsStore.updateById(id, {
     endUserDelivered: true,
   });
 
   return res.json(updated);
 };
 
-export const deleteBooking = (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+export const completeBooking = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
 
-  if (Number.isNaN(id)) {
+  if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
 
-  const deleted = bookingsStore.deleteById(id);
+  const role = getRequestRole(req);
+
+  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const permissionCheck = canComplete(role!, booking);
+
+  if (!permissionCheck.allowed) {
+    return res.status(403).json({ error: permissionCheck.reason });
+  }
+
+  return updateStatusAndRespond(res, id, "COMPLETED");
+};
+
+export const deleteBooking = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const deleted = await bookingsStore.deleteById(id);
 
   if (!deleted) {
     return res.status(404).json({ error: "Booking not found" });

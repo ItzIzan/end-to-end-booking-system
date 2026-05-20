@@ -1,0 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CUSTOMER
+  TRANSPORT_ADMIN
+  OPS_ADMIN
+  SECURITY
+  DRIVER
+  END_USER
+}
+
+enum BookingStatus {
+  BOOKING_PENDING
+  BOOKING_COUNTER
+  BOOKING_CONFIRMED
+  READY_TO_COLLECT
+  SITE_RELEASED
+  ADMIN_DISPATCHED
+  IN_TRANSIT
+  COMPLETED
+}
+
+model Booking {
+  id                 Int           @id @default(autoincrement())
+  site               String
+  reg                String
+  agreementRef       String
+  make               String
+  model              String
+  colour             String
+  dispatchDate       String?
+  status             BookingStatus @default(BOOKING_PENDING)
+  createdAt          DateTime      @default(now())
+  customerName       String
+  lastCounteredBy    UserRole?
+  assignedDriverName String?
+  driverDelivered    Boolean       @default(false)
+  endUserDelivered   Boolean       @default(false)
+}

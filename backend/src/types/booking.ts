@@ -5,9 +5,10 @@ export type BookingStatus =
   | "BOOKING_COUNTER"
   | "BOOKING_CONFIRMED"
   | "READY_TO_COLLECT"
-  | "COLLECTED"
+  | "SITE_RELEASED"
+  | "ADMIN_DISPATCHED"
   | "IN_TRANSIT"
-  | "RELEASED";
+  | "COMPLETED";
 
 export interface Booking {
   id: number;
@@ -21,7 +22,7 @@ export interface Booking {
   status: BookingStatus;
   createdAt: string;
   customerName: string;
-  lastCounteredBy: Extract<UserRole, "CUSTOMER" | "DRIVER_ADMIN"> | null;
+  lastCounteredBy: Extract<UserRole, "CUSTOMER" | "TRANSPORT_ADMIN"> | null;
   assignedDriverName: string | null;
   driverDelivered: boolean;
   endUserDelivered: boolean;

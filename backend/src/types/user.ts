@@ -1,6 +1,6 @@
 export type UserRole =
   | "CUSTOMER"
-  | "DRIVER_ADMIN"
+  | "TRANSPORT_ADMIN"
   | "OPS_ADMIN"
   | "SECURITY"
   | "DRIVER"
