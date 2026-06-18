@@ -5,3 +5,12 @@ export type UserRole =
   | "SECURITY"
   | "DRIVER"
   | "END_USER";
+
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  isActive: boolean;
+  createdAt: string;
+}

@@ -8,6 +8,7 @@ import {
   createBooking,
   deleteBooking,
   dispatchBooking,
+  getBookingAuditLogs,
   getBookingById,
   getBookings,
   markReady,
@@ -20,6 +21,8 @@ const router = Router();
 
 router.get("/", getBookings);
 router.get("/:id", getBookingById);
+router.get("/:id/audit", getBookingAuditLogs);
+
 router.post("/", createBooking);
 
 router.patch("/:id", updateBooking);

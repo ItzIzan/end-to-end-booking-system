@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
+import { auditLogsStore } from "../store/auditLogs.store";
 import { bookingsStore } from "../store/bookings.store";
 import type { Booking, BookingFilters, BookingStatus } from "../types/booking";
+import type { UserRole } from "../types/user";
 import {
   canComplete,
   canConfirmBooking,
@@ -46,6 +48,16 @@ function getRequestRole(req: Request) {
   return getRoleFromHeader(req.header("x-user-role"));
 }
 
+function getActorName(req: Request): string | null {
+  const actorName = req.header("x-user-name");
+
+  if (!actorName || !actorName.trim()) {
+    return null;
+  }
+
+  return actorName.trim();
+}
+
 function handleRoleCheck(
   res: Response,
   role: ReturnType<typeof getRoleFromHeader>,
@@ -63,13 +75,53 @@ function handleRoleCheck(
   return true;
 }
 
+function toAuditValue(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return String(value);
+}
+
+async function createAuditLog(input: {
+  bookingId: number;
+  action: string;
+  fieldName?: string | null;
+  previousValue?: unknown;
+  newValue?: unknown;
+  changedByRole?: UserRole | null;
+  changedByName?: string | null;
+}) {
+  await auditLogsStore.create({
+    bookingId: input.bookingId,
+    action: input.action,
+    fieldName: input.fieldName ?? null,
+    previousValue: toAuditValue(input.previousValue),
+    newValue: toAuditValue(input.newValue),
+    changedByRole: input.changedByRole ?? null,
+    changedByName: input.changedByName ?? null,
+  });
+}
+
 async function updateStatusAndRespond(
+  req: Request,
   res: Response,
-  bookingId: number,
-  nextStatus: BookingStatus
+  booking: Booking,
+  nextStatus: BookingStatus,
+  action: string
 ) {
-  const updated = await bookingsStore.updateById(bookingId, {
+  const updated = await bookingsStore.updateById(booking.id, {
     status: nextStatus,
+  });
+
+  await createAuditLog({
+    bookingId: booking.id,
+    action,
+    fieldName: "status",
+    previousValue: booking.status,
+    newValue: nextStatus,
+    changedByRole: getRequestRole(req),
+    changedByName: getActorName(req),
   });
 
   return res.json(updated);
@@ -153,6 +205,22 @@ export const getBookingById = async (req: Request, res: Response) => {
   return res.json(booking);
 };
 
+export const getBookingAuditLogs = async (req: Request, res: Response) => {
+  const id = parseBookingId(req);
+
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid booking id" });
+  }
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  const auditLogs = await auditLogsStore.getByBookingId(id);
+
+  return res.json(auditLogs);
+};
+
 export const createBooking = async (req: Request, res: Response) => {
   const { site, reg, agreementRef, make, model, colour, customerName } =
     req.body;
@@ -183,6 +251,16 @@ export const createBooking = async (req: Request, res: Response) => {
     assignedDriverName: null,
     driverDelivered: false,
     endUserDelivered: false,
+  });
+
+  await createAuditLog({
+    bookingId: booking.id,
+    action: "BOOKING_CREATED",
+    fieldName: "status",
+    previousValue: null,
+    newValue: booking.status,
+    changedByRole: getRequestRole(req),
+    changedByName: getActorName(req),
   });
 
   return res.status(201).json(booking);
@@ -224,6 +302,16 @@ export const updateBooking = async (req: Request, res: Response) => {
     dispatchDate,
   });
 
+  await createAuditLog({
+    bookingId: id,
+    action: "DISPATCH_DATE_UPDATED",
+    fieldName: "dispatchDate",
+    previousValue: booking.dispatchDate,
+    newValue: dispatchDate,
+    changedByRole: getRequestRole(req),
+    changedByName: getActorName(req),
+  });
+
   return res.json(updated);
 };
 
@@ -248,11 +336,13 @@ export const confirmBooking = async (req: Request, res: Response) => {
     return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  const updated = await bookingsStore.updateById(id, {
-    status: "BOOKING_CONFIRMED",
-  });
-
-  return res.json(updated);
+  return updateStatusAndRespond(
+    req,
+    res,
+    booking,
+    "BOOKING_CONFIRMED",
+    "BOOKING_CONFIRMED"
+  );
 };
 
 export const assignDriver = async (req: Request, res: Response) => {
@@ -291,8 +381,20 @@ export const assignDriver = async (req: Request, res: Response) => {
     });
   }
 
+  const nextDriverName = assignedDriverName.trim();
+
   const updated = await bookingsStore.updateById(id, {
-    assignedDriverName: assignedDriverName.trim(),
+    assignedDriverName: nextDriverName,
+  });
+
+  await createAuditLog({
+    bookingId: id,
+    action: "DRIVER_ASSIGNED",
+    fieldName: "assignedDriverName",
+    previousValue: booking.assignedDriverName,
+    newValue: nextDriverName,
+    changedByRole: role,
+    changedByName: getActorName(req),
   });
 
   return res.json(updated);
@@ -319,7 +421,13 @@ export const markReady = async (req: Request, res: Response) => {
     return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  return updateStatusAndRespond(res, id, "READY_TO_COLLECT");
+  return updateStatusAndRespond(
+    req,
+    res,
+    booking,
+    "READY_TO_COLLECT",
+    "MARKED_READY_TO_COLLECT"
+  );
 };
 
 export const releaseFromSite = async (req: Request, res: Response) => {
@@ -343,7 +451,13 @@ export const releaseFromSite = async (req: Request, res: Response) => {
     return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  return updateStatusAndRespond(res, id, "SITE_RELEASED");
+  return updateStatusAndRespond(
+    req,
+    res,
+    booking,
+    "SITE_RELEASED",
+    "SITE_RELEASED"
+  );
 };
 
 export const dispatchBooking = async (req: Request, res: Response) => {
@@ -367,7 +481,13 @@ export const dispatchBooking = async (req: Request, res: Response) => {
     return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  return updateStatusAndRespond(res, id, "ADMIN_DISPATCHED");
+  return updateStatusAndRespond(
+    req,
+    res,
+    booking,
+    "ADMIN_DISPATCHED",
+    "BOOKING_DISPATCHED"
+  );
 };
 
 export const startTransit = async (req: Request, res: Response) => {
@@ -391,7 +511,13 @@ export const startTransit = async (req: Request, res: Response) => {
     return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  return updateStatusAndRespond(res, id, "IN_TRANSIT");
+  return updateStatusAndRespond(
+    req,
+    res,
+    booking,
+    "IN_TRANSIT",
+    "TRANSIT_STARTED"
+  );
 };
 
 export const confirmDriverDelivered = async (req: Request, res: Response) => {
@@ -429,6 +555,16 @@ export const confirmDriverDelivered = async (req: Request, res: Response) => {
 
   const updated = await bookingsStore.updateById(id, {
     driverDelivered: true,
+  });
+
+  await createAuditLog({
+    bookingId: id,
+    action: "DRIVER_DELIVERY_CONFIRMED",
+    fieldName: "driverDelivered",
+    previousValue: booking.driverDelivered,
+    newValue: true,
+    changedByRole: role,
+    changedByName: getActorName(req),
   });
 
   return res.json(updated);
@@ -475,6 +611,16 @@ export const confirmEndUserDelivered = async (
     endUserDelivered: true,
   });
 
+  await createAuditLog({
+    bookingId: id,
+    action: "END_USER_DELIVERY_CONFIRMED",
+    fieldName: "endUserDelivered",
+    previousValue: booking.endUserDelivered,
+    newValue: true,
+    changedByRole: role,
+    changedByName: getActorName(req),
+  });
+
   return res.json(updated);
 };
 
@@ -499,7 +645,13 @@ export const completeBooking = async (req: Request, res: Response) => {
     return res.status(403).json({ error: permissionCheck.reason });
   }
 
-  return updateStatusAndRespond(res, id, "COMPLETED");
+  return updateStatusAndRespond(
+    req,
+    res,
+    booking,
+    "COMPLETED",
+    "BOOKING_COMPLETED"
+  );
 };
 
 export const deleteBooking = async (req: Request, res: Response) => {
@@ -508,6 +660,20 @@ export const deleteBooking = async (req: Request, res: Response) => {
   if (id === null) {
     return res.status(400).json({ error: "Invalid booking id" });
   }
+
+  const booking = await getBookingOr404(id, res);
+
+  if (!booking) return;
+
+  await createAuditLog({
+    bookingId: id,
+    action: "BOOKING_DELETED",
+    fieldName: "status",
+    previousValue: booking.status,
+    newValue: null,
+    changedByRole: getRequestRole(req),
+    changedByName: getActorName(req),
+  });
 
   const deleted = await bookingsStore.deleteById(id);
 

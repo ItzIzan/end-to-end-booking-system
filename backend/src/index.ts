@@ -1,12 +1,14 @@
 import express from "express";
 import healthRoutes from "./routes/health.routes";
 import bookingRoutes from "./routes/bookings.routes";
+import userRoutes from "./routes/users.routes";
 
 const app = express();
 
 app.use(express.json());
 
 app.use("/health", healthRoutes);
+app.use("/users", userRoutes);
 app.use("/bookings", bookingRoutes);
 
 const PORT = 3000;

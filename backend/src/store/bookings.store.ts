@@ -46,9 +46,7 @@ export const bookingsStore = {
     });
   },
 
-  async create(
-    data: Omit<Booking, "id" | "createdAt">
-  ): Promise<Booking> {
+  async create(data: Omit<Booking, "id" | "createdAt">): Promise<Booking> {
     return prisma.booking.create({
       data,
     });
