@@ -1,11 +1,19 @@
 const { prisma } = require("../lib/prisma");
-import type { AuditLog, CreateAuditLogInput } from "../types/auditLog";
+import type {
+  AuditEntityType,
+  AuditLog,
+  CreateAuditLogInput,
+} from "../types/auditLog";
 
 export const auditLogsStore = {
-  async getByBookingId(bookingId: number): Promise<AuditLog[]> {
+  async getByEntity(
+    entityType: AuditEntityType,
+    entityId: number
+  ): Promise<AuditLog[]> {
     return prisma.auditLog.findMany({
       where: {
-        bookingId,
+        entityType,
+        entityId,
       },
       orderBy: {
         createdAt: "desc",

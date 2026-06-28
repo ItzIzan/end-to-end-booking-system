@@ -7,6 +7,7 @@ datasource db {
 }
 
 enum UserRole {
+  SYSTEM_ADMIN
   CUSTOMER
   TRANSPORT_ADMIN
   OPS_ADMIN
@@ -21,47 +22,157 @@ enum BookingStatus {
   BOOKING_CONFIRMED
   READY_TO_COLLECT
   SITE_RELEASED
+  SECURITY_REJECTED
   ADMIN_DISPATCHED
   IN_TRANSIT
   COMPLETED
 }
 
+enum VehicleStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  HOLD
+  REMOVED
+}
+
+enum FuelType {
+  PETROL
+  DIESEL
+  HYBRID
+  ELECTRIC
+}
+
+enum VehicleSource {
+  MANUAL
+  CSV_IMPORT
+}
+
+enum AuditEntityType {
+  USER
+  SITE
+  VEHICLE
+  BOOKING
+  BOOKING_SETTINGS
+}
+
 model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedBookings       Booking[]         @relation("AssignedDriver")
+  createdBookings        Booking[]         @relation("CreatedByUser")
+  auditLogs              AuditLog[]
+  bookingSettingsUpdates BookingSettings[]
+}
+
+model Site {
   id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  role      UserRole
+  name      String   @unique
+  address   String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicles Vehicle[]
+}
+
+model Vehicle {
+  id               Int           @id @default(autoincrement())
+  siteId           Int
+  vin              String        @unique
+  reg              String
+  make             String
+  model            String
+  colour           String
+  fuelType         FuelType
+  mileage          Int
+  registrationDate DateTime
+  motExpiryDate    DateTime
+  vehicleStatus    VehicleStatus @default(AVAILABLE)
+  source           VehicleSource @default(MANUAL)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  site     Site      @relation(fields: [siteId], references: [id])
+  bookings Booking[]
+
+  @@index([reg])
+  @@index([vehicleStatus])
+  @@index([siteId])
 }
 
 model Booking {
-  id                 Int           @id @default(autoincrement())
-  site               String
-  reg                String
-  agreementRef       String
-  make               String
-  model              String
-  colour             String
-  dispatchDate       String?
-  status             BookingStatus @default(BOOKING_PENDING)
-  createdAt          DateTime      @default(now())
-  customerName       String
-  lastCounteredBy    UserRole?
-  assignedDriverName String?
-  driverDelivered    Boolean       @default(false)
-  endUserDelivered   Boolean       @default(false)
+  id               Int           @id @default(autoincrement())
+  vehicleId        Int
+  jobNumber        String        @unique
+  agreementRef     String
+
+  customerName         String
+  customerContactName  String
+  customerEmail        String
+  customerPhone        String
+  customerAddress      String
+
+  requestedCollectionDate DateTime
+  confirmedCollectionDate DateTime?
+  counterProposedDate     DateTime?
+  dispatchDate            DateTime?
+
+  status                 BookingStatus @default(BOOKING_PENDING)
+  lastCounteredBy         UserRole?
+  assignedDriverId        Int?
+  createdByUserId         Int?
+  driverDelivered         Boolean       @default(false)
+  endUserDelivered        Boolean       @default(false)
+  securityRejectedReason  String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  vehicle        Vehicle @relation(fields: [vehicleId], references: [id])
+  assignedDriver User?   @relation("AssignedDriver", fields: [assignedDriverId], references: [id])
+  createdByUser  User?   @relation("CreatedByUser", fields: [createdByUserId], references: [id])
+
+  @@index([vehicleId])
+  @@index([status])
+  @@index([assignedDriverId])
+  @@index([dispatchDate])
+  @@index([requestedCollectionDate])
+}
+
+model BookingSettings {
+  id              Int      @id @default(1)
+  processingDays  Int      @default(3)
+  dailySlotLimit  Int      @default(60)
+  cutoffHour      Int      @default(12)
+  updatedByUserId Int?
+  updatedAt       DateTime @updatedAt
+
+  updatedByUser User? @relation(fields: [updatedByUserId], references: [id])
 }
 
 model AuditLog {
-  id            Int      @id @default(autoincrement())
-  bookingId     Int
-  action        String
-  fieldName     String?
-  previousValue String?
-  newValue      String?
+  id              Int             @id @default(autoincrement())
+  entityType      AuditEntityType
+  entityId        Int
+  action          String
+  fieldName       String?
+  previousValue   String?
+  newValue        String?
   changedByUserId Int?
-  changedByRole UserRole?
-  changedByName String?
-  createdAt     DateTime @default(now())
+  changedByRole   UserRole?
+  changedByName   String?
+  createdAt       DateTime        @default(now())
+
+  changedByUser User? @relation(fields: [changedByUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([changedByUserId])
 }

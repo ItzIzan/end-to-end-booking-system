@@ -2,6 +2,7 @@ import type { Booking } from "../types/booking";
 import type { UserRole } from "../types/user";
 
 const ALL_USER_ROLES: UserRole[] = [
+  "SYSTEM_ADMIN",
   "CUSTOMER",
   "TRANSPORT_ADMIN",
   "OPS_ADMIN",
@@ -15,15 +16,11 @@ export function isUserRole(value: string): value is UserRole {
 }
 
 export function getRoleFromHeader(roleHeader: unknown): UserRole | null {
-  if (typeof roleHeader !== "string") {
-    return null;
-  }
+  if (typeof roleHeader !== "string") return null;
 
   const normalisedRole = roleHeader.trim().toUpperCase();
 
-  if (!isUserRole(normalisedRole)) {
-    return null;
-  }
+  if (!isUserRole(normalisedRole)) return null;
 
   return normalisedRole;
 }
@@ -36,8 +33,12 @@ export function requireRole(
     return {
       allowed: false,
       reason:
-        "Missing or invalid x-user-role header. Allowed roles: CUSTOMER, TRANSPORT_ADMIN, OPS_ADMIN, SECURITY, DRIVER, END_USER",
+        "Missing or invalid x-user-role header. Allowed roles: SYSTEM_ADMIN, CUSTOMER, TRANSPORT_ADMIN, OPS_ADMIN, SECURITY, DRIVER, END_USER",
     };
+  }
+
+  if (role === "SYSTEM_ADMIN") {
+    return { allowed: true };
   }
 
   if (!allowedRoles.includes(role)) {
@@ -50,32 +51,79 @@ export function requireRole(
   return { allowed: true };
 }
 
-export function canConfirmBooking(role: UserRole, booking: Booking) {
-  if (booking.status === "BOOKING_PENDING") {
-    return role === "TRANSPORT_ADMIN"
-      ? { allowed: true }
-      : {
-          allowed: false,
-          reason: "Only TRANSPORT_ADMIN can confirm from BOOKING_PENDING",
-        };
+export function canAcceptBookingDate(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
+  if (role !== "TRANSPORT_ADMIN") {
+    return {
+      allowed: false,
+      reason: "Only TRANSPORT_ADMIN can accept booking dates",
+    };
   }
 
-  if (booking.status === "BOOKING_COUNTER") {
-    return role === "CUSTOMER"
-      ? { allowed: true }
-      : {
-          allowed: false,
-          reason: "Only CUSTOMER can confirm from BOOKING_COUNTER",
-        };
+  if (booking.status !== "BOOKING_PENDING") {
+    return {
+      allowed: false,
+      reason: `Can only accept date from BOOKING_PENDING, current status is ${booking.status}`,
+    };
   }
 
-  return {
-    allowed: false,
-    reason: `Cannot confirm booking from ${booking.status}`,
-  };
+  return { allowed: true };
+}
+
+export function canCounterBookingDate(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
+  if (role !== "TRANSPORT_ADMIN") {
+    return {
+      allowed: false,
+      reason: "Only TRANSPORT_ADMIN can counter booking dates",
+    };
+  }
+
+  if (
+    booking.status !== "BOOKING_PENDING" &&
+    booking.status !== "BOOKING_COUNTER"
+  ) {
+    return {
+      allowed: false,
+      reason: `Can only counter from BOOKING_PENDING or BOOKING_COUNTER, current status is ${booking.status}`,
+    };
+  }
+
+  return { allowed: true };
+}
+
+export function canCustomerAcceptCounter(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
+  if (role !== "CUSTOMER") {
+    return {
+      allowed: false,
+      reason: "Only CUSTOMER can accept a counter-proposed date",
+    };
+  }
+
+  if (booking.status !== "BOOKING_COUNTER") {
+    return {
+      allowed: false,
+      reason: `Can only accept counter from BOOKING_COUNTER, current status is ${booking.status}`,
+    };
+  }
+
+  if (!booking.counterProposedDate) {
+    return {
+      allowed: false,
+      reason: "There is no counter-proposed date to accept",
+    };
+  }
+
+  return { allowed: true };
 }
 
 export function canMarkReady(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
   if (role !== "OPS_ADMIN") {
     return { allowed: false, reason: "Only OPS_ADMIN can mark ready" };
   }
@@ -91,6 +139,8 @@ export function canMarkReady(role: UserRole, booking: Booking) {
 }
 
 export function canReleaseFromSite(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
   if (role !== "SECURITY") {
     return {
       allowed: false,
@@ -108,7 +158,29 @@ export function canReleaseFromSite(role: UserRole, booking: Booking) {
   return { allowed: true };
 }
 
+export function canRejectAtSecurity(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
+  if (role !== "SECURITY") {
+    return {
+      allowed: false,
+      reason: "Only SECURITY can reject vehicle release",
+    };
+  }
+
+  if (booking.status !== "READY_TO_COLLECT") {
+    return {
+      allowed: false,
+      reason: `Can only reject from READY_TO_COLLECT, current status is ${booking.status}`,
+    };
+  }
+
+  return { allowed: true };
+}
+
 export function canDispatch(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
   if (role !== "TRANSPORT_ADMIN") {
     return {
       allowed: false,
@@ -123,7 +195,7 @@ export function canDispatch(role: UserRole, booking: Booking) {
     };
   }
 
-  if (!booking.assignedDriverName) {
+  if (!booking.assignedDriverId) {
     return {
       allowed: false,
       reason: "Cannot dispatch before a driver has been assigned",
@@ -134,6 +206,8 @@ export function canDispatch(role: UserRole, booking: Booking) {
 }
 
 export function canStartTransit(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
   if (role !== "DRIVER") {
     return { allowed: false, reason: "Only DRIVER can start transit" };
   }
@@ -145,7 +219,7 @@ export function canStartTransit(role: UserRole, booking: Booking) {
     };
   }
 
-  if (!booking.assignedDriverName) {
+  if (!booking.assignedDriverId) {
     return {
       allowed: false,
       reason: "Cannot start transit before a driver has been assigned",
@@ -156,6 +230,8 @@ export function canStartTransit(role: UserRole, booking: Booking) {
 }
 
 export function canComplete(role: UserRole, booking: Booking) {
+  if (role === "SYSTEM_ADMIN") return { allowed: true };
+
   if (role !== "TRANSPORT_ADMIN") {
     return {
       allowed: false,

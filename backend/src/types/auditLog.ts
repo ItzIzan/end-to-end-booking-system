@@ -1,8 +1,16 @@
 import type { UserRole } from "./user";
 
+export type AuditEntityType =
+  | "USER"
+  | "SITE"
+  | "VEHICLE"
+  | "BOOKING"
+  | "BOOKING_SETTINGS";
+
 export interface AuditLog {
   id: number;
-  bookingId: number;
+  entityType: AuditEntityType;
+  entityId: number;
   action: string;
   fieldName: string | null;
   previousValue: string | null;

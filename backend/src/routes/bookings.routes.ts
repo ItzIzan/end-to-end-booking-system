@@ -1,10 +1,10 @@
 import { Router } from "express";
 import {
+  acceptBookingDate,
+  acceptCounterDate,
   assignDriver,
   completeBooking,
-  confirmBooking,
-  confirmDriverDelivered,
-  confirmEndUserDelivered,
+  counterBookingDate,
   createBooking,
   deleteBooking,
   dispatchBooking,
@@ -12,9 +12,11 @@ import {
   getBookingById,
   getBookings,
   markReady,
+  rejectAtSecurity,
   releaseFromSite,
   startTransit,
-  updateBooking,
+  confirmDriverDelivered,
+  confirmEndUserDelivered,
 } from "../controllers/bookings.controller";
 
 const router = Router();
@@ -25,12 +27,14 @@ router.get("/:id/audit", getBookingAuditLogs);
 
 router.post("/", createBooking);
 
-router.patch("/:id", updateBooking);
+router.post("/:id/accept-date", acceptBookingDate);
+router.post("/:id/counter-date", counterBookingDate);
+router.post("/:id/accept-counter", acceptCounterDate);
 
-router.post("/:id/confirm-booking", confirmBooking);
 router.post("/:id/assign-driver", assignDriver);
 router.post("/:id/mark-ready", markReady);
 router.post("/:id/release-from-site", releaseFromSite);
+router.post("/:id/security-reject", rejectAtSecurity);
 router.post("/:id/dispatch", dispatchBooking);
 router.post("/:id/start-transit", startTransit);
 router.post("/:id/driver-delivered", confirmDriverDelivered);

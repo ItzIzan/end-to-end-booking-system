@@ -7,17 +7,16 @@ export const bookingsStore = {
 
     if (filters) {
       if (filters.id !== undefined) where.id = filters.id;
+      if (filters.vehicleId !== undefined) where.vehicleId = filters.vehicleId;
       if (filters.status !== undefined) where.status = filters.status;
-      if (filters.dispatchDate !== undefined)
-        where.dispatchDate = filters.dispatchDate;
+      if (filters.assignedDriverId !== undefined)
+        where.assignedDriverId = filters.assignedDriverId;
 
       const stringFields = [
-        "site",
-        "reg",
+        "jobNumber",
         "agreementRef",
-        "make",
-        "model",
-        "colour",
+        "customerName",
+        "customerEmail",
       ] as const;
 
       for (const field of stringFields) {
@@ -25,7 +24,7 @@ export const bookingsStore = {
 
         if (value) {
           where[field] = {
-            equals: value,
+            contains: value,
             mode: "insensitive",
           };
         }
@@ -34,6 +33,15 @@ export const bookingsStore = {
 
     return prisma.booking.findMany({
       where,
+      include: {
+        vehicle: {
+          include: {
+            site: true,
+          },
+        },
+        assignedDriver: true,
+        createdByUser: true,
+      },
       orderBy: {
         createdAt: "desc",
       },
@@ -43,12 +51,73 @@ export const bookingsStore = {
   async getById(id: number): Promise<Booking | null> {
     return prisma.booking.findUnique({
       where: { id },
+      include: {
+        vehicle: {
+          include: {
+            site: true,
+          },
+        },
+        assignedDriver: true,
+        createdByUser: true,
+      },
     });
   },
 
-  async create(data: Omit<Booking, "id" | "createdAt">): Promise<Booking> {
+  async countByDispatchDate(dispatchDate: Date): Promise<number> {
+    const start = new Date(dispatchDate);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(dispatchDate);
+    end.setHours(23, 59, 59, 999);
+
+    return prisma.booking.count({
+      where: {
+        dispatchDate: {
+          gte: start,
+          lte: end,
+        },
+      },
+    });
+  },
+
+  async countByDispatchDateExcludingBooking(
+    dispatchDate: Date,
+    bookingId: number
+  ): Promise<number> {
+    const start = new Date(dispatchDate);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(dispatchDate);
+    end.setHours(23, 59, 59, 999);
+
+    return prisma.booking.count({
+      where: {
+        id: {
+          not: bookingId,
+        },
+        dispatchDate: {
+          gte: start,
+          lte: end,
+        },
+      },
+    });
+  },
+
+  async create(
+    data: Omit<Booking, "id" | "createdAt" | "updatedAt">
+  ): Promise<Booking> {
     return prisma.booking.create({
-      data,
+      data: {
+        ...data,
+        requestedCollectionDate: new Date(data.requestedCollectionDate),
+        confirmedCollectionDate: data.confirmedCollectionDate
+          ? new Date(data.confirmedCollectionDate)
+          : null,
+        counterProposedDate: data.counterProposedDate
+          ? new Date(data.counterProposedDate)
+          : null,
+        dispatchDate: data.dispatchDate ? new Date(data.dispatchDate) : null,
+      },
     });
   },
 
@@ -58,11 +127,15 @@ export const bookingsStore = {
       Pick<
         Booking,
         | "status"
+        | "requestedCollectionDate"
+        | "confirmedCollectionDate"
+        | "counterProposedDate"
         | "dispatchDate"
         | "lastCounteredBy"
-        | "assignedDriverName"
+        | "assignedDriverId"
         | "driverDelivered"
         | "endUserDelivered"
+        | "securityRejectedReason"
       >
     >
   ): Promise<Booking | null> {
@@ -70,13 +143,25 @@ export const bookingsStore = {
       where: { id },
     });
 
-    if (!existing) {
-      return null;
-    }
+    if (!existing) return null;
 
     return prisma.booking.update({
       where: { id },
-      data: updates,
+      data: {
+        ...updates,
+        requestedCollectionDate: updates.requestedCollectionDate
+          ? new Date(updates.requestedCollectionDate)
+          : undefined,
+        confirmedCollectionDate: updates.confirmedCollectionDate
+          ? new Date(updates.confirmedCollectionDate)
+          : updates.confirmedCollectionDate,
+        counterProposedDate: updates.counterProposedDate
+          ? new Date(updates.counterProposedDate)
+          : updates.counterProposedDate,
+        dispatchDate: updates.dispatchDate
+          ? new Date(updates.dispatchDate)
+          : updates.dispatchDate,
+      },
     });
   },
 
@@ -85,9 +170,7 @@ export const bookingsStore = {
       where: { id },
     });
 
-    if (!existing) {
-      return false;
-    }
+    if (!existing) return false;
 
     await prisma.booking.delete({
       where: { id },

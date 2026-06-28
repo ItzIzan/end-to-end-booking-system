@@ -6,36 +6,46 @@ export type BookingStatus =
   | "BOOKING_CONFIRMED"
   | "READY_TO_COLLECT"
   | "SITE_RELEASED"
+  | "SECURITY_REJECTED"
   | "ADMIN_DISPATCHED"
   | "IN_TRANSIT"
   | "COMPLETED";
 
 export interface Booking {
   id: number;
-  site: string;
-  reg: string;
+  vehicleId: number;
+  jobNumber: string;
   agreementRef: string;
-  make: string;
-  model: string;
-  colour: string;
-  dispatchDate: string | null;
-  status: BookingStatus;
-  createdAt: string;
+
   customerName: string;
-  lastCounteredBy: Extract<UserRole, "CUSTOMER" | "TRANSPORT_ADMIN"> | null;
-  assignedDriverName: string | null;
+  customerContactName: string;
+  customerEmail: string;
+  customerPhone: string;
+  customerAddress: string;
+
+  requestedCollectionDate: string;
+  confirmedCollectionDate: string | null;
+  counterProposedDate: string | null;
+  dispatchDate: string | null;
+
+  status: BookingStatus;
+  lastCounteredBy: UserRole | null;
+  assignedDriverId: number | null;
+  createdByUserId: number | null;
   driverDelivered: boolean;
   endUserDelivered: boolean;
+  securityRejectedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type BookingFilters = {
   id?: number;
-  site?: string;
-  reg?: string;
+  vehicleId?: number;
+  jobNumber?: string;
   agreementRef?: string;
-  make?: string;
-  model?: string;
-  colour?: string;
-  dispatchDate?: string | null;
+  customerName?: string;
+  customerEmail?: string;
   status?: BookingStatus;
+  assignedDriverId?: number;
 };
