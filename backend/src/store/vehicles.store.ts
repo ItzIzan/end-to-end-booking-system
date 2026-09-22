@@ -1,4 +1,5 @@
 const { prisma } = require("../lib/prisma");
+
 import type {
   CreateVehicleInput,
   Vehicle,
@@ -10,13 +11,40 @@ export const vehiclesStore = {
     const where: Record<string, unknown> = {};
 
     if (filters) {
-      if (filters.id !== undefined) where.id = filters.id;
-      if (filters.siteId !== undefined) where.siteId = filters.siteId;
-      if (filters.fuelType !== undefined) where.fuelType = filters.fuelType;
-      if (filters.vehicleStatus !== undefined)
-        where.vehicleStatus = filters.vehicleStatus;
+      if (filters.id !== undefined) {
+        where.id = filters.id;
+      }
 
-      const stringFields = ["reg", "vin", "make", "model", "colour"] as const;
+      if (filters.siteId !== undefined) {
+        where.siteId = filters.siteId;
+      }
+
+      if (filters.customerAccountId !== undefined) {
+        where.customerAccountId = filters.customerAccountId;
+      }
+
+      if (filters.fuelType !== undefined) {
+        where.fuelType = filters.fuelType;
+      }
+
+      if (filters.vehicleStatus !== undefined) {
+        where.vehicleStatus = filters.vehicleStatus;
+      }
+
+      if (filters.stockStage) {
+        where.stockStage = {
+          contains: filters.stockStage,
+          mode: "insensitive",
+        };
+      }
+
+      const stringFields = [
+        "reg",
+        "vin",
+        "make",
+        "model",
+        "colour",
+      ] as const;
 
       for (const field of stringFields) {
         const value = filters[field];
@@ -34,6 +62,7 @@ export const vehiclesStore = {
       where,
       include: {
         site: true,
+        customerAccount: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -46,6 +75,7 @@ export const vehiclesStore = {
       where: { id },
       include: {
         site: true,
+        customerAccount: true,
         bookings: {
           orderBy: {
             createdAt: "desc",
@@ -55,7 +85,9 @@ export const vehiclesStore = {
     });
   },
 
-  async create(data: CreateVehicleInput): Promise<Vehicle> {
+  async create(
+    data: CreateVehicleInput
+  ): Promise<Vehicle> {
     return prisma.vehicle.create({
       data: {
         ...data,
@@ -79,9 +111,11 @@ export const vehiclesStore = {
       where: { id },
       data: {
         ...updates,
+
         registrationDate: updates.registrationDate
           ? new Date(updates.registrationDate)
           : undefined,
+
         motExpiryDate: updates.motExpiryDate
           ? new Date(updates.motExpiryDate)
           : undefined,

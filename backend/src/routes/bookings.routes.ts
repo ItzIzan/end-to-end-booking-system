@@ -1,46 +1,144 @@
 import { Router } from "express";
+
 import {
   acceptBookingDate,
   acceptCounterDate,
   assignDriver,
-  completeBooking,
+  cancelBooking,
+  confirmDateChange,
+  confirmDriverCollection,
+  confirmDriverDelivered,
   counterBookingDate,
   createBooking,
-  deleteBooking,
-  dispatchBooking,
   getBookingAuditLogs,
   getBookingById,
   getBookings,
   markReady,
-  rejectAtSecurity,
+  placeSecurityHold,
   releaseFromSite,
-  startTransit,
-  confirmDriverDelivered,
-  confirmEndUserDelivered,
+  requestDateChange,
+  resolveSecurityHold,
+  verifyDeliveryOtp,
+  verifyDriverAtSecurity,
 } from "../controllers/bookings.controller";
 
 const router = Router();
 
+/*
+ * Public recipient confirmation.
+ * No account required.
+ */
+router.post(
+  "/delivery-confirm/:token",
+  verifyDeliveryOtp
+);
+
 router.get("/", getBookings);
-router.get("/:id", getBookingById);
-router.get("/:id/audit", getBookingAuditLogs);
 
-router.post("/", createBooking);
+router.get(
+  "/:id",
+  getBookingById
+);
 
-router.post("/:id/accept-date", acceptBookingDate);
-router.post("/:id/counter-date", counterBookingDate);
-router.post("/:id/accept-counter", acceptCounterDate);
+router.get(
+  "/:id/audit",
+  getBookingAuditLogs
+);
 
-router.post("/:id/assign-driver", assignDriver);
-router.post("/:id/mark-ready", markReady);
-router.post("/:id/release-from-site", releaseFromSite);
-router.post("/:id/security-reject", rejectAtSecurity);
-router.post("/:id/dispatch", dispatchBooking);
-router.post("/:id/start-transit", startTransit);
-router.post("/:id/driver-delivered", confirmDriverDelivered);
-router.post("/:id/enduser-delivered", confirmEndUserDelivered);
-router.post("/:id/complete", completeBooking);
+router.post(
+  "/",
+  createBooking
+);
 
-router.delete("/:id", deleteBooking);
+/*
+ * Initial date negotiation.
+ */
+router.post(
+  "/:id/accept-date",
+  acceptBookingDate
+);
+
+router.post(
+  "/:id/counter-date",
+  counterBookingDate
+);
+
+router.post(
+  "/:id/accept-counter",
+  acceptCounterDate
+);
+
+/*
+ * Date changes after confirmation.
+ */
+router.post(
+  "/:id/request-date-change",
+  requestDateChange
+);
+
+router.post(
+  "/:id/confirm-date-change",
+  confirmDateChange
+);
+
+/*
+ * Driver Admin.
+ */
+router.post(
+  "/:id/assign-driver",
+  assignDriver
+);
+
+/*
+ * Ops.
+ */
+router.post(
+  "/:id/mark-ready",
+  markReady
+);
+
+/*
+ * Collection day.
+ */
+router.post(
+  "/:id/security-verify-driver",
+  verifyDriverAtSecurity
+);
+
+router.post(
+  "/:id/driver-collected",
+  confirmDriverCollection
+);
+
+router.post(
+  "/:id/security-hold",
+  placeSecurityHold
+);
+
+router.post(
+  "/:id/resolve-security-hold",
+  resolveSecurityHold
+);
+
+router.post(
+  "/:id/security-release",
+  releaseFromSite
+);
+
+/*
+ * Delivery.
+ */
+router.post(
+  "/:id/driver-delivered",
+  confirmDriverDelivered
+);
+
+/*
+ * Cancellation.
+ */
+router.post(
+  "/:id/cancel",
+  cancelBooking
+);
 
 export default router;

@@ -2,6 +2,7 @@ import type { UserRole } from "./user";
 
 export type AuditEntityType =
   | "USER"
+  | "CUSTOMER_ACCOUNT"
   | "SITE"
   | "VEHICLE"
   | "BOOKING"
@@ -21,4 +22,5 @@ export interface AuditLog {
   createdAt: string;
 }
 
-export type CreateAuditLogInput = Omit<AuditLog, "id" | "createdAt">;
+export type CreateAuditLogInput =
+  Omit<AuditLog, "id" | "createdAt">;

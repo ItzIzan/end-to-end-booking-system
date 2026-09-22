@@ -1,22 +1,105 @@
 const { prisma } = require("../lib/prisma");
-import type { Booking, BookingFilters } from "../types/booking";
+
+import type {
+  Booking,
+  BookingFilters,
+  BookingUpdateInput,
+  CreateBookingInput,
+} from "../types/booking";
+
+const DATE_FIELDS = [
+  "requestedCollectionDate",
+  "confirmedCollectionDate",
+  "counterProposedDate",
+  "scheduledCollectionDate",
+  "pendingDateChange",
+  "dateChangeRequestedAt",
+  "readyToCollectAt",
+  "securityDriverVerifiedAt",
+  "driverCollectedAt",
+  "securityReleasedAt",
+  "securityHoldAt",
+  "securityHoldResolvedAt",
+  "driverDeliveredAt",
+  "deliveryOtpExpiresAt",
+  "deliveryOtpVerifiedAt",
+  "cancelledAt",
+] as const;
+
+function normaliseDates(data: Record<string, any>) {
+  const result = { ...data };
+
+  for (const field of DATE_FIELDS) {
+    if (!(field in result)) continue;
+
+    const value = result[field];
+
+    if (value === null) {
+      result[field] = null;
+    } else if (value !== undefined) {
+      result[field] =
+        value instanceof Date ? value : new Date(value);
+    }
+  }
+
+  return result;
+}
+
+function safeBooking(record: any): Booking {
+  const {
+    deliveryOtpHash,
+    deliveryConfirmationToken,
+    ...safe
+  } = record;
+
+  return safe;
+}
+
+const include = {
+  vehicle: {
+    include: {
+      site: true,
+      customerAccount: true,
+    },
+  },
+
+  customerAccount: true,
+  assignedDriver: true,
+  createdByUser: true,
+};
 
 export const bookingsStore = {
   async getAll(filters?: BookingFilters): Promise<Booking[]> {
-    const where: Record<string, unknown> = {};
+    const where: Record<string, any> = {};
 
     if (filters) {
-      if (filters.id !== undefined) where.id = filters.id;
-      if (filters.vehicleId !== undefined) where.vehicleId = filters.vehicleId;
-      if (filters.status !== undefined) where.status = filters.status;
-      if (filters.assignedDriverId !== undefined)
-        where.assignedDriverId = filters.assignedDriverId;
+      if (filters.id !== undefined) {
+        where.id = filters.id;
+      }
+
+      if (filters.vehicleId !== undefined) {
+        where.vehicleId = filters.vehicleId;
+      }
+
+      if (filters.customerAccountId !== undefined) {
+        where.customerAccountId =
+          filters.customerAccountId;
+      }
+
+      if (filters.status !== undefined) {
+        where.status = filters.status;
+      }
+
+      if (filters.assignedDriverId !== undefined) {
+        where.assignedDriverId =
+          filters.assignedDriverId;
+      }
 
       const stringFields = [
         "jobNumber",
         "agreementRef",
-        "customerName",
-        "customerEmail",
+        "recipientName",
+        "recipientEmail",
       ] as const;
 
       for (const field of stringFields) {
@@ -31,63 +114,80 @@ export const bookingsStore = {
       }
     }
 
-    return prisma.booking.findMany({
+    const rows = await prisma.booking.findMany({
       where,
-      include: {
-        vehicle: {
-          include: {
-            site: true,
-          },
-        },
-        assignedDriver: true,
-        createdByUser: true,
-      },
+      include,
       orderBy: {
         createdAt: "desc",
       },
     });
+
+    return rows.map(safeBooking);
   },
 
   async getById(id: number): Promise<Booking | null> {
-    return prisma.booking.findUnique({
+    const row = await prisma.booking.findUnique({
       where: { id },
-      include: {
-        vehicle: {
-          include: {
-            site: true,
-          },
-        },
-        assignedDriver: true,
-        createdByUser: true,
+      include,
+    });
+
+    return row ? safeBooking(row) : null;
+  },
+
+  async getByDeliveryToken(token: string) {
+    return prisma.booking.findUnique({
+      where: {
+        deliveryConfirmationToken: token,
       },
     });
   },
 
-  async countByDispatchDate(dispatchDate: Date): Promise<number> {
-    const start = new Date(dispatchDate);
+  async hasActiveBookingForVehicle(
+    vehicleId: number
+  ): Promise<boolean> {
+    const count = await prisma.booking.count({
+      where: {
+        vehicleId,
+        status: {
+          notIn: ["COMPLETED", "CANCELLED"],
+        },
+      },
+    });
+
+    return count > 0;
+  },
+
+  async countByScheduledCollectionDate(
+    date: Date
+  ): Promise<number> {
+    const start = new Date(date);
     start.setHours(0, 0, 0, 0);
 
-    const end = new Date(dispatchDate);
+    const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
     return prisma.booking.count({
       where: {
-        dispatchDate: {
+        scheduledCollectionDate: {
           gte: start,
           lte: end,
+        },
+
+        status: {
+          not: "CANCELLED",
         },
       },
     });
   },
 
-  async countByDispatchDateExcludingBooking(
-    dispatchDate: Date,
+  async countByScheduledCollectionDateExcludingBooking(
+    date: Date,
     bookingId: number
   ): Promise<number> {
-    const start = new Date(dispatchDate);
+    const start = new Date(date);
     start.setHours(0, 0, 0, 0);
 
-    const end = new Date(dispatchDate);
+    const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
     return prisma.booking.count({
@@ -95,49 +195,33 @@ export const bookingsStore = {
         id: {
           not: bookingId,
         },
-        dispatchDate: {
+
+        scheduledCollectionDate: {
           gte: start,
           lte: end,
+        },
+
+        status: {
+          not: "CANCELLED",
         },
       },
     });
   },
 
   async create(
-    data: Omit<Booking, "id" | "createdAt" | "updatedAt">
+    data: CreateBookingInput
   ): Promise<Booking> {
-    return prisma.booking.create({
-      data: {
-        ...data,
-        requestedCollectionDate: new Date(data.requestedCollectionDate),
-        confirmedCollectionDate: data.confirmedCollectionDate
-          ? new Date(data.confirmedCollectionDate)
-          : null,
-        counterProposedDate: data.counterProposedDate
-          ? new Date(data.counterProposedDate)
-          : null,
-        dispatchDate: data.dispatchDate ? new Date(data.dispatchDate) : null,
-      },
+    const row = await prisma.booking.create({
+      data: normaliseDates(data),
+      include,
     });
+
+    return safeBooking(row);
   },
 
   async updateById(
     id: number,
-    updates: Partial<
-      Pick<
-        Booking,
-        | "status"
-        | "requestedCollectionDate"
-        | "confirmedCollectionDate"
-        | "counterProposedDate"
-        | "dispatchDate"
-        | "lastCounteredBy"
-        | "assignedDriverId"
-        | "driverDelivered"
-        | "endUserDelivered"
-        | "securityRejectedReason"
-      >
-    >
+    updates: BookingUpdateInput
   ): Promise<Booking | null> {
     const existing = await prisma.booking.findUnique({
       where: { id },
@@ -145,37 +229,12 @@ export const bookingsStore = {
 
     if (!existing) return null;
 
-    return prisma.booking.update({
+    const row = await prisma.booking.update({
       where: { id },
-      data: {
-        ...updates,
-        requestedCollectionDate: updates.requestedCollectionDate
-          ? new Date(updates.requestedCollectionDate)
-          : undefined,
-        confirmedCollectionDate: updates.confirmedCollectionDate
-          ? new Date(updates.confirmedCollectionDate)
-          : updates.confirmedCollectionDate,
-        counterProposedDate: updates.counterProposedDate
-          ? new Date(updates.counterProposedDate)
-          : updates.counterProposedDate,
-        dispatchDate: updates.dispatchDate
-          ? new Date(updates.dispatchDate)
-          : updates.dispatchDate,
-      },
-    });
-  },
-
-  async deleteById(id: number): Promise<boolean> {
-    const existing = await prisma.booking.findUnique({
-      where: { id },
+      data: normaliseDates(updates),
+      include,
     });
 
-    if (!existing) return false;
-
-    await prisma.booking.delete({
-      where: { id },
-    });
-
-    return true;
+    return safeBooking(row);
   },
 };

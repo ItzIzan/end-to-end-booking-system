@@ -4,8 +4,7 @@ export type UserRole =
   | "TRANSPORT_ADMIN"
   | "OPS_ADMIN"
   | "SECURITY"
-  | "DRIVER"
-  | "END_USER";
+  | "DRIVER";
 
 export interface User {
   id: number;
@@ -14,6 +13,7 @@ export interface User {
   email: string;
   role: UserRole;
   isActive: boolean;
+  customerAccountId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -28,4 +28,4 @@ export interface RegisterUserInput {
   email: string;
   passwordHash: string;
   role: UserRole;
-}
+  customerAccountId?: number | null;

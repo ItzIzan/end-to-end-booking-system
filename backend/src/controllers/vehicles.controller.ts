@@ -1,13 +1,20 @@
-import { Request, Response } from "express";
+import {
+  Request,
+  Response,
+} from "express";
+
 import { auditLogsStore } from "../store/auditLogs.store";
+import { customerAccountsStore } from "../store/customerAccounts.store";
 import { sitesStore } from "../store/sites.store";
 import { vehiclesStore } from "../store/vehicles.store";
+
 import type {
   FuelType,
   VehicleFilters,
   VehicleSource,
   VehicleStatus,
 } from "../types/vehicle";
+
 import { getRoleFromHeader } from "../utils/bookingPermissions";
 
 const VEHICLE_STATUSES: VehicleStatus[] = [
@@ -18,271 +25,912 @@ const VEHICLE_STATUSES: VehicleStatus[] = [
   "REMOVED",
 ];
 
-const FUEL_TYPES: FuelType[] = ["PETROL", "DIESEL", "HYBRID", "ELECTRIC"];
+const FUEL_TYPES: FuelType[] = [
+  "PETROL",
+  "DIESEL",
+  "HYBRID",
+  "ELECTRIC",
+];
 
-const VEHICLE_SOURCES: VehicleSource[] = ["MANUAL", "CSV_IMPORT"];
+const VEHICLE_SOURCES: VehicleSource[] = [
+  "MANUAL",
+  "CSV_IMPORT",
+  "EXCEL_IMPORT",
+];
 
 function getActor(req: Request) {
-  const userIdHeader = req.header("x-user-id");
-  const userId = userIdHeader ? Number(userIdHeader) : null;
+  const userIdHeader =
+    req.header("x-user-id");
+
+  const userId = userIdHeader
+    ? Number(userIdHeader)
+    : null;
 
   return {
-    changedByUserId: userId && !Number.isNaN(userId) ? userId : null,
-    changedByRole: getRoleFromHeader(req.header("x-user-role")),
-    changedByName: req.header("x-user-name") || null,
+    changedByUserId:
+      userId &&
+      !Number.isNaN(userId)
+        ? userId
+        : null,
+
+    changedByRole:
+      getRoleFromHeader(
+        req.header(
+          "x-user-role"
+        )
+      ),
+
+    changedByName:
+      req.header(
+        "x-user-name"
+      ) || null,
   };
 }
 
-function isDateString(value: string) {
-  return !Number.isNaN(new Date(value).getTime());
+function isDateString(
+  value: string
+) {
+  return !Number.isNaN(
+    new Date(value).getTime()
+  );
 }
 
-export const getVehicles = async (req: Request, res: Response) => {
-  const {
-    id,
-    siteId,
-    reg,
-    vin,
-    make,
-    model,
-    colour,
-    fuelType,
-    vehicleStatus,
-  } = req.query;
+export const getVehicles =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const {
+      id,
+      siteId,
+      customerAccountId,
 
-  const filters: VehicleFilters = {};
+      reg,
+      vin,
+      make,
+      model,
+      colour,
 
-  if (id !== undefined) {
-    const parsedId = Number(id);
-    if (Number.isNaN(parsedId)) {
-      return res.status(400).json({ error: "id must be a number" });
-    }
-    filters.id = parsedId;
-  }
+      fuelType,
+      vehicleStatus,
 
-  if (siteId !== undefined) {
-    const parsedSiteId = Number(siteId);
-    if (Number.isNaN(parsedSiteId)) {
-      return res.status(400).json({ error: "siteId must be a number" });
-    }
-    filters.siteId = parsedSiteId;
-  }
+      stockStage,
+    } = req.query;
 
-  if (reg !== undefined) filters.reg = String(reg);
-  if (vin !== undefined) filters.vin = String(vin);
-  if (make !== undefined) filters.make = String(make);
-  if (model !== undefined) filters.model = String(model);
-  if (colour !== undefined) filters.colour = String(colour);
+    const filters: VehicleFilters =
+      {};
 
-  if (fuelType !== undefined) {
-    const parsedFuelType = String(fuelType).toUpperCase() as FuelType;
+    if (id !== undefined) {
+      const parsedId =
+        Number(id);
 
-    if (!FUEL_TYPES.includes(parsedFuelType)) {
-      return res.status(400).json({ error: "Invalid fuelType" });
-    }
+      if (
+        Number.isNaN(parsedId)
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "id must be a number",
+          });
+      }
 
-    filters.fuelType = parsedFuelType;
-  }
-
-  if (vehicleStatus !== undefined) {
-    const parsedStatus = String(vehicleStatus).toUpperCase() as VehicleStatus;
-
-    if (!VEHICLE_STATUSES.includes(parsedStatus)) {
-      return res.status(400).json({ error: "Invalid vehicleStatus" });
+      filters.id =
+        parsedId;
     }
 
-    filters.vehicleStatus = parsedStatus;
-  }
+    if (
+      siteId !== undefined
+    ) {
+      const parsedSiteId =
+        Number(siteId);
 
-  const vehicles = await vehiclesStore.getAll(filters);
-  return res.json(vehicles);
-};
+      if (
+        Number.isNaN(
+          parsedSiteId
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "siteId must be a number",
+          });
+      }
 
-export const getVehicleById = async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+      filters.siteId =
+        parsedSiteId;
+    }
 
-  if (Number.isNaN(id)) {
-    return res.status(400).json({ error: "Invalid vehicle id" });
-  }
+    if (
+      customerAccountId !==
+      undefined
+    ) {
+      const parsedCustomerAccountId =
+        Number(
+          customerAccountId
+        );
 
-  const vehicle = await vehiclesStore.getById(id);
+      if (
+        Number.isNaN(
+          parsedCustomerAccountId
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "customerAccountId must be a number",
+          });
+      }
 
-  if (!vehicle) {
-    return res.status(404).json({ error: "Vehicle not found" });
-  }
+      filters.customerAccountId =
+        parsedCustomerAccountId;
+    }
 
-  return res.json(vehicle);
-};
+    if (
+      reg !== undefined
+    ) {
+      filters.reg =
+        String(reg);
+    }
 
-export const createVehicle = async (req: Request, res: Response) => {
-  const {
-    siteId,
-    vin,
-    reg,
-    make,
-    model,
-    colour,
-    fuelType,
-    mileage,
-    registrationDate,
-    motExpiryDate,
-    vehicleStatus = "AVAILABLE",
-    source = "MANUAL",
-  } = req.body;
+    if (
+      vin !== undefined
+    ) {
+      filters.vin =
+        String(vin);
+    }
 
-  if (
-    !siteId ||
-    !vin ||
-    !reg ||
-    !make ||
-    !model ||
-    !colour ||
-    !fuelType ||
-    mileage === undefined ||
-    !registrationDate ||
-    !motExpiryDate
-  ) {
-    return res.status(400).json({
-      error:
-        "siteId, vin, reg, make, model, colour, fuelType, mileage, registrationDate and motExpiryDate are required",
+    if (
+      make !== undefined
+    ) {
+      filters.make =
+        String(make);
+    }
+
+    if (
+      model !== undefined
+    ) {
+      filters.model =
+        String(model);
+    }
+
+    if (
+      colour !== undefined
+    ) {
+      filters.colour =
+        String(colour);
+    }
+
+    if (
+      stockStage !== undefined
+    ) {
+      filters.stockStage =
+        String(stockStage);
+    }
+
+    if (
+      fuelType !== undefined
+    ) {
+      const parsedFuelType =
+        String(
+          fuelType
+        ).toUpperCase() as FuelType;
+
+      if (
+        !FUEL_TYPES.includes(
+          parsedFuelType
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid fuelType",
+          });
+      }
+
+      filters.fuelType =
+        parsedFuelType;
+    }
+
+    if (
+      vehicleStatus !==
+      undefined
+    ) {
+      const parsedStatus =
+        String(
+          vehicleStatus
+        ).toUpperCase() as VehicleStatus;
+
+      if (
+        !VEHICLE_STATUSES.includes(
+          parsedStatus
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid vehicleStatus",
+          });
+      }
+
+      filters.vehicleStatus =
+        parsedStatus;
+    }
+
+    const vehicles =
+      await vehiclesStore.getAll(
+        filters
+      );
+
+    return res.json(
+      vehicles
+    );
+  };
+
+export const getVehicleById =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id =
+      Number(req.params.id);
+
+    if (
+      Number.isNaN(id)
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Invalid vehicle id",
+        });
+    }
+
+    const vehicle =
+      await vehiclesStore.getById(
+        id
+      );
+
+    if (!vehicle) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Vehicle not found",
+        });
+    }
+
+    return res.json(
+      vehicle
+    );
+  };
+
+export const createVehicle =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const {
+      siteId,
+      customerAccountId,
+
+      vin,
+      reg,
+      make,
+      model,
+      colour,
+
+      fuelType,
+      mileage,
+
+      registrationDate,
+      motExpiryDate,
+
+      vehicleStatus =
+        "AVAILABLE",
+
+      stockStage = null,
+
+      source = "MANUAL",
+    } = req.body;
+
+    if (
+      !siteId ||
+      !customerAccountId ||
+      !vin ||
+      !reg ||
+      !make ||
+      !model ||
+      !colour ||
+      !fuelType ||
+      mileage === undefined ||
+      !registrationDate ||
+      !motExpiryDate
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "siteId, customerAccountId, vin, reg, make, model, colour, fuelType, mileage, registrationDate and motExpiryDate are required",
+        });
+    }
+
+    const parsedSiteId =
+      Number(siteId);
+
+    const parsedCustomerAccountId =
+      Number(
+        customerAccountId
+      );
+
+    const parsedMileage =
+      Number(mileage);
+
+    if (
+      Number.isNaN(
+        parsedSiteId
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "siteId must be a number",
+        });
+    }
+
+    if (
+      Number.isNaN(
+        parsedCustomerAccountId
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "customerAccountId must be a number",
+        });
+    }
+
+    if (
+      Number.isNaN(
+        parsedMileage
+      ) ||
+      parsedMileage < 0
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "mileage must be 0 or more",
+        });
+    }
+
+    const parsedFuelType =
+      String(
+        fuelType
+      ).toUpperCase() as FuelType;
+
+    const parsedVehicleStatus =
+      String(
+        vehicleStatus
+      ).toUpperCase() as VehicleStatus;
+
+    const parsedSource =
+      String(
+        source
+      ).toUpperCase() as VehicleSource;
+
+    if (
+      !FUEL_TYPES.includes(
+        parsedFuelType
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Invalid fuelType",
+        });
+    }
+
+    if (
+      !VEHICLE_STATUSES.includes(
+        parsedVehicleStatus
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Invalid vehicleStatus",
+        });
+    }
+
+    if (
+      !VEHICLE_SOURCES.includes(
+        parsedSource
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Invalid source",
+        });
+    }
+
+    if (
+      !isDateString(
+        registrationDate
+      ) ||
+      !isDateString(
+        motExpiryDate
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "registrationDate and motExpiryDate must be valid dates",
+        });
+    }
+
+    /*
+     * Validate site.
+     */
+    const site =
+      await sitesStore.getById(
+        parsedSiteId
+      );
+
+    if (
+      !site ||
+      !site.isActive
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Site does not exist or is inactive",
+        });
+    }
+
+    /*
+     * Validate customer account.
+     */
+    const customerAccount =
+      await customerAccountsStore.getById(
+        parsedCustomerAccountId
+      );
+
+    if (
+      !customerAccount ||
+      !customerAccount.isActive
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Customer account does not exist or is inactive",
+        });
+    }
+
+    const vehicle =
+      await vehiclesStore.create({
+        siteId:
+          parsedSiteId,
+
+        customerAccountId:
+          parsedCustomerAccountId,
+
+        vin:
+          String(vin).trim(),
+
+        reg:
+          String(reg).trim(),
+
+        make:
+          String(make).trim(),
+
+        model:
+          String(model).trim(),
+
+        colour:
+          String(colour).trim(),
+
+        fuelType:
+          parsedFuelType,
+
+        mileage:
+          parsedMileage,
+
+        registrationDate,
+
+        motExpiryDate,
+
+        vehicleStatus:
+          parsedVehicleStatus,
+
+        stockStage:
+          stockStage
+            ? String(
+                stockStage
+              ).trim()
+            : null,
+
+        source:
+          parsedSource,
+      });
+
+    await auditLogsStore.create({
+      entityType:
+        "VEHICLE",
+
+      entityId:
+        vehicle.id,
+
+      action:
+        "VEHICLE_CREATED",
+
+      fieldName:
+        "vehicleStatus",
+
+      previousValue: null,
+
+      newValue:
+        vehicle.vehicleStatus,
+
+      ...getActor(req),
     });
-  }
 
-  const parsedSiteId = Number(siteId);
-  const parsedMileage = Number(mileage);
+    return res
+      .status(201)
+      .json(vehicle);
+  };
 
-  if (Number.isNaN(parsedSiteId)) {
-    return res.status(400).json({ error: "siteId must be a number" });
-  }
+export const updateVehicle =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id =
+      Number(req.params.id);
 
-  if (Number.isNaN(parsedMileage) || parsedMileage < 0) {
-    return res.status(400).json({ error: "mileage must be 0 or more" });
-  }
+    if (
+      Number.isNaN(id)
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Invalid vehicle id",
+        });
+    }
 
-  const parsedFuelType = String(fuelType).toUpperCase() as FuelType;
-  const parsedVehicleStatus = String(vehicleStatus).toUpperCase() as VehicleStatus;
-  const parsedSource = String(source).toUpperCase() as VehicleSource;
+    const existing =
+      await vehiclesStore.getById(
+        id
+      );
 
-  if (!FUEL_TYPES.includes(parsedFuelType)) {
-    return res.status(400).json({ error: "Invalid fuelType" });
-  }
+    if (!existing) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Vehicle not found",
+        });
+    }
 
-  if (!VEHICLE_STATUSES.includes(parsedVehicleStatus)) {
-    return res.status(400).json({ error: "Invalid vehicleStatus" });
-  }
+    const updates = {
+      ...req.body,
+    };
 
-  if (!VEHICLE_SOURCES.includes(parsedSource)) {
-    return res.status(400).json({ error: "Invalid source" });
-  }
+    /*
+     * Mileage
+     */
+    if (
+      updates.mileage !==
+      undefined
+    ) {
+      updates.mileage =
+        Number(
+          updates.mileage
+        );
 
-  if (!isDateString(registrationDate) || !isDateString(motExpiryDate)) {
-    return res.status(400).json({
-      error: "registrationDate and motExpiryDate must be valid dates",
+      if (
+        Number.isNaN(
+          updates.mileage
+        ) ||
+        updates.mileage < 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "mileage must be 0 or more",
+          });
+      }
+    }
+
+    /*
+     * Site
+     */
+    if (
+      updates.siteId !==
+      undefined
+    ) {
+      updates.siteId =
+        Number(
+          updates.siteId
+        );
+
+      if (
+        Number.isNaN(
+          updates.siteId
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "siteId must be a number",
+          });
+      }
+
+      const site =
+        await sitesStore.getById(
+          updates.siteId
+        );
+
+      if (
+        !site ||
+        !site.isActive
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Site does not exist or is inactive",
+          });
+      }
+    }
+
+    /*
+     * Customer account
+     */
+    if (
+      updates.customerAccountId !==
+      undefined
+    ) {
+      updates.customerAccountId =
+        Number(
+          updates.customerAccountId
+        );
+
+      if (
+        Number.isNaN(
+          updates.customerAccountId
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "customerAccountId must be a number",
+          });
+      }
+
+      const customerAccount =
+        await customerAccountsStore.getById(
+          updates.customerAccountId
+        );
+
+      if (
+        !customerAccount ||
+        !customerAccount.isActive
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Customer account does not exist or is inactive",
+          });
+      }
+    }
+
+    /*
+     * Fuel type
+     */
+    if (
+      updates.fuelType !==
+      undefined
+    ) {
+      updates.fuelType =
+        String(
+          updates.fuelType
+        ).toUpperCase();
+
+      if (
+        !FUEL_TYPES.includes(
+          updates.fuelType
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid fuelType",
+          });
+      }
+    }
+
+    /*
+     * Vehicle status
+     */
+    if (
+      updates.vehicleStatus !==
+      undefined
+    ) {
+      updates.vehicleStatus =
+        String(
+          updates.vehicleStatus
+        ).toUpperCase();
+
+      if (
+        !VEHICLE_STATUSES.includes(
+          updates.vehicleStatus
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid vehicleStatus",
+          });
+      }
+    }
+
+    /*
+     * Source
+     */
+    if (
+      updates.source !==
+      undefined
+    ) {
+      updates.source =
+        String(
+          updates.source
+        ).toUpperCase();
+
+      if (
+        !VEHICLE_SOURCES.includes(
+          updates.source
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid source",
+          });
+      }
+    }
+
+    /*
+     * Stock stage
+     */
+    if (
+      updates.stockStage !==
+      undefined
+    ) {
+      if (
+        updates.stockStage ===
+        null
+      ) {
+        updates.stockStage =
+          null;
+      } else {
+        updates.stockStage =
+          String(
+            updates.stockStage
+          ).trim();
+      }
+    }
+
+    /*
+     * Dates
+     */
+    if (
+      updates.registrationDate !==
+      undefined &&
+      !isDateString(
+        updates.registrationDate
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "registrationDate must be a valid date",
+        });
+    }
+
+    if (
+      updates.motExpiryDate !==
+      undefined &&
+      !isDateString(
+        updates.motExpiryDate
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "motExpiryDate must be a valid date",
+        });
+    }
+
+    /*
+     * Basic text cleanup.
+     */
+    const textFields = [
+      "vin",
+      "reg",
+      "make",
+      "model",
+      "colour",
+    ];
+
+    for (
+      const field of textFields
+    ) {
+      if (
+        updates[field] !==
+        undefined
+      ) {
+        updates[field] =
+          String(
+            updates[field]
+          ).trim();
+      }
+    }
+
+    const updated =
+      await vehiclesStore.updateById(
+        id,
+        updates
+      );
+
+    await auditLogsStore.create({
+      entityType:
+        "VEHICLE",
+
+      entityId: id,
+
+      action:
+        "VEHICLE_UPDATED",
+
+      fieldName: null,
+
+      previousValue:
+        JSON.stringify(
+          existing
+        ),
+
+      newValue:
+        JSON.stringify(
+          updated
+        ),
+
+      ...getActor(req),
     });
-  }
 
-  const site = await sitesStore.getById(parsedSiteId);
-
-  if (!site || !site.isActive) {
-    return res.status(400).json({
-      error: "Site does not exist or is inactive",
-    });
-  }
-
-  const vehicle = await vehiclesStore.create({
-    siteId: parsedSiteId,
-    vin,
-    reg,
-    make,
-    model,
-    colour,
-    fuelType: parsedFuelType,
-    mileage: parsedMileage,
-    registrationDate,
-    motExpiryDate,
-    vehicleStatus: parsedVehicleStatus,
-    source: parsedSource,
-  });
-
-  await auditLogsStore.create({
-    entityType: "VEHICLE",
-    entityId: vehicle.id,
-    action: "VEHICLE_CREATED",
-    fieldName: "vehicleStatus",
-    previousValue: null,
-    newValue: vehicle.vehicleStatus,
-    ...getActor(req),
-  });
-
-  return res.status(201).json(vehicle);
-};
-
-export const updateVehicle = async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
-
-  if (Number.isNaN(id)) {
-    return res.status(400).json({ error: "Invalid vehicle id" });
-  }
-
-  const existing = await vehiclesStore.getById(id);
-
-  if (!existing) {
-    return res.status(404).json({ error: "Vehicle not found" });
-  }
-
-  const updates = { ...req.body };
-
-  if (updates.mileage !== undefined) {
-    updates.mileage = Number(updates.mileage);
-
-    if (Number.isNaN(updates.mileage) || updates.mileage < 0) {
-      return res.status(400).json({ error: "mileage must be 0 or more" });
-    }
-  }
-
-  if (updates.siteId !== undefined) {
-    updates.siteId = Number(updates.siteId);
-
-    if (Number.isNaN(updates.siteId)) {
-      return res.status(400).json({ error: "siteId must be a number" });
-    }
-  }
-
-  if (updates.fuelType !== undefined) {
-    updates.fuelType = String(updates.fuelType).toUpperCase();
-
-    if (!FUEL_TYPES.includes(updates.fuelType)) {
-      return res.status(400).json({ error: "Invalid fuelType" });
-    }
-  }
-
-  if (updates.vehicleStatus !== undefined) {
-    updates.vehicleStatus = String(updates.vehicleStatus).toUpperCase();
-
-    if (!VEHICLE_STATUSES.includes(updates.vehicleStatus)) {
-      return res.status(400).json({ error: "Invalid vehicleStatus" });
-    }
-  }
-
-  if (updates.source !== undefined) {
-    updates.source = String(updates.source).toUpperCase();
-
-    if (!VEHICLE_SOURCES.includes(updates.source)) {
-      return res.status(400).json({ error: "Invalid source" });
-    }
-  }
-
-  const updated = await vehiclesStore.updateById(id, updates);
-
-  await auditLogsStore.create({
-    entityType: "VEHICLE",
-    entityId: id,
-    action: "VEHICLE_UPDATED",
-    fieldName: null,
-    previousValue: JSON.stringify(existing),
-    newValue: JSON.stringify(updated),
-    ...getActor(req),
-  });
-
-  return res.json(updated);
-};
+    return res.json(
+      updated
+    );
+  };

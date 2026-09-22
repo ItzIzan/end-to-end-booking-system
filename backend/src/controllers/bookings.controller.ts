@@ -1,23 +1,34 @@
 import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
+
+const {
+  randomBytes,
+  randomInt,
+} = require("crypto");
+
 import { auditLogsStore } from "../store/auditLogs.store";
 import { bookingSettingsStore } from "../store/bookingSettings.store";
 import { bookingsStore } from "../store/bookings.store";
+import { customerAccountsStore } from "../store/customerAccounts.store";
 import { usersStore } from "../store/users.store";
 import { vehiclesStore } from "../store/vehicles.store";
-import type { Booking, BookingFilters, BookingStatus } from "../types/booking";
+
+import type {
+  Booking,
+  BookingFilters,
+  BookingStatus,
+} from "../types/booking";
+
+import type { User } from "../types/user";
+
 import {
   canAcceptBookingDate,
-  canComplete,
   canCounterBookingDate,
   canCustomerAcceptCounter,
-  canDispatch,
   canMarkReady,
-  canRejectAtSecurity,
-  canReleaseFromSite,
-  canStartTransit,
-  getRoleFromHeader,
   requireRole,
 } from "../utils/bookingPermissions";
+
 import {
   formatDateOnly,
   getEarliestCollectionDate,
@@ -30,15 +41,18 @@ const ALLOWED_STATUSES: BookingStatus[] = [
   "BOOKING_COUNTER",
   "BOOKING_CONFIRMED",
   "READY_TO_COLLECT",
-  "SITE_RELEASED",
-  "SECURITY_REJECTED",
-  "ADMIN_DISPATCHED",
+  "SECURITY_HOLD",
   "IN_TRANSIT",
+  "DELIVERED_PENDING_CONFIRMATION",
   "COMPLETED",
+  "CANCELLED",
 ];
 
-function parseBookingId(req: Request): number | null {
+function parseBookingId(
+  req: Request
+): number | null {
   const id = Number(req.params.id);
+
   return Number.isNaN(id) ? null : id;
 }
 
@@ -46,50 +60,93 @@ async function getBookingOr404(
   id: number,
   res: Response
 ): Promise<Booking | null> {
-  const booking = await bookingsStore.getById(id);
+  const booking =
+    await bookingsStore.getById(id);
 
   if (!booking) {
-    res.status(404).json({ error: "Booking not found" });
+    res.status(404).json({
+      error: "Booking not found",
+    });
+
     return null;
   }
 
   return booking;
 }
 
-function getRequestRole(req: Request) {
-  return getRoleFromHeader(req.header("x-user-role"));
-}
+async function getRequestUser(
+  req: Request,
+  res: Response
+): Promise<User | null> {
+  const header =
+    req.header("x-user-id");
 
-function getActor(req: Request) {
-  const userIdHeader = req.header("x-user-id");
-  const userId = userIdHeader ? Number(userIdHeader) : null;
+  if (!header) {
+    res.status(401).json({
+      error: "Missing x-user-id header",
+    });
 
-  return {
-    changedByUserId: userId && !Number.isNaN(userId) ? userId : null,
-    changedByRole: getRequestRole(req),
-    changedByName: req.header("x-user-name") || null,
-  };
+    return null;
+  }
+
+  const id = Number(header);
+
+  if (Number.isNaN(id)) {
+    res.status(400).json({
+      error: "x-user-id must be a number",
+    });
+
+    return null;
+  }
+
+  const user =
+    await usersStore.getById(id);
+
+  if (!user || !user.isActive) {
+    res.status(401).json({
+      error:
+        "User does not exist or is inactive",
+    });
+
+    return null;
+  }
+
+  return user;
 }
 
 function handleRoleCheck(
   res: Response,
-  role: ReturnType<typeof getRoleFromHeader>,
-  allowedRoles: Parameters<typeof requireRole>[1]
+  user: User,
+  allowedRoles: Parameters<
+    typeof requireRole
+  >[1]
 ): boolean {
-  const roleCheck = requireRole(role, allowedRoles);
+  const check = requireRole(
+    user.role,
+    allowedRoles
+  );
 
-  if (!roleCheck.allowed) {
-    res.status(role ? 403 : 400).json({
-      error: roleCheck.reason,
+  if (!check.allowed) {
+    res.status(403).json({
+      error: check.reason,
     });
+
     return false;
   }
 
   return true;
 }
 
-function toAuditValue(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
+function toAuditValue(
+  value: unknown
+): string | null {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
   return String(value);
 }
 
@@ -99,24 +156,50 @@ async function createAuditLog(input: {
   fieldName?: string | null;
   previousValue?: unknown;
   newValue?: unknown;
-  req: Request;
+  actor: User;
 }) {
   await auditLogsStore.create({
     entityType: "BOOKING",
     entityId: input.bookingId,
     action: input.action,
-    fieldName: input.fieldName ?? null,
-    previousValue: toAuditValue(input.previousValue),
-    newValue: toAuditValue(input.newValue),
-    ...getActor(input.req),
+
+    fieldName:
+      input.fieldName ?? null,
+
+    previousValue: toAuditValue(
+      input.previousValue
+    ),
+
+    newValue: toAuditValue(
+      input.newValue
+    ),
+
+    changedByUserId:
+      input.actor.id,
+
+    changedByRole:
+      input.actor.role,
+
+    changedByName:
+      input.actor.name,
   });
 }
 
 async function validateCollectionDate(
   dateString: string,
   bookingIdToExclude?: number
-): Promise<{ valid: true; date: Date } | { valid: false; error: string }> {
-  const parsedDate = parseDateOnly(dateString);
+): Promise<
+  | {
+      valid: true;
+      date: Date;
+    }
+  | {
+      valid: false;
+      error: string;
+    }
+> {
+  const parsedDate =
+    parseDateOnly(dateString);
 
   if (!parsedDate) {
     return {
@@ -125,29 +208,49 @@ async function validateCollectionDate(
     };
   }
 
-  const settings = await bookingSettingsStore.get();
+  const settings =
+    await bookingSettingsStore.get();
 
-  if (!isCollectionDateAllowed(parsedDate, new Date(), settings)) {
+  if (
+    !isCollectionDateAllowed(
+      parsedDate,
+      new Date(),
+      settings
+    )
+  ) {
     return {
       valid: false,
-      error: `Date is not available. Earliest allowed working day is ${formatDateOnly(
-        getEarliestCollectionDate(new Date(), settings)
-      )}`,
+      error:
+        `Date is not available. Earliest allowed working day is ` +
+        `${formatDateOnly(
+          getEarliestCollectionDate(
+            new Date(),
+            settings
+          )
+        )}`,
     };
   }
 
-  const bookingsForDate =
+  const count =
     bookingIdToExclude !== undefined
-      ? await bookingsStore.countByDispatchDateExcludingBooking(
-          parsedDate,
-          bookingIdToExclude
-        )
-      : await bookingsStore.countByDispatchDate(parsedDate);
+      ? await bookingsStore
+          .countByScheduledCollectionDateExcludingBooking(
+            parsedDate,
+            bookingIdToExclude
+          )
+      : await bookingsStore
+          .countByScheduledCollectionDate(
+            parsedDate
+          );
 
-  if (bookingsForDate >= settings.dailySlotLimit) {
+  if (
+    count >= settings.dailySlotLimit
+  ) {
     return {
       valid: false,
-      error: `No slots available for ${dateString}. Daily limit is ${settings.dailySlotLimit}`,
+      error:
+        `No slots are available for ${dateString}. ` +
+        `Daily limit is ${settings.dailySlotLimit}`,
     };
   }
 
@@ -157,685 +260,2356 @@ async function validateCollectionDate(
   };
 }
 
-async function updateStatusAndRespond(
-  req: Request,
-  res: Response,
-  booking: Booking,
-  nextStatus: BookingStatus,
-  action: string
+function customerOwnsBooking(
+  user: User,
+  booking: Booking
 ) {
-  const updated = await bookingsStore.updateById(booking.id, {
-    status: nextStatus,
-  });
-
-  await createAuditLog({
-    bookingId: booking.id,
-    action,
-    fieldName: "status",
-    previousValue: booking.status,
-    newValue: nextStatus,
-    req,
-  });
-
-  return res.json(updated);
+  return (
+    user.role !== "CUSTOMER" ||
+    user.customerAccountId ===
+      booking.customerAccountId
+  );
 }
 
-export const getBookings = async (req: Request, res: Response) => {
-  const {
-    id,
-    vehicleId,
-    jobNumber,
-    agreementRef,
-    customerName,
-    customerEmail,
-    status,
-    assignedDriverId,
-  } = req.query;
+export const getBookings =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const {
+      id,
+      vehicleId,
+      customerAccountId,
+      jobNumber,
+      agreementRef,
+      recipientName,
+      recipientEmail,
+      status,
+      assignedDriverId,
+    } = req.query;
 
-  const filters: BookingFilters = {};
+    const filters: BookingFilters = {};
 
-  if (id !== undefined) {
-    const parsedId = Number(id);
-    if (Number.isNaN(parsedId)) {
-      return res.status(400).json({ error: "id must be a number" });
+    if (id !== undefined) {
+      const parsed = Number(id);
+
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          error:
+            "id must be a number",
+        });
+      }
+
+      filters.id = parsed;
     }
-    filters.id = parsedId;
-  }
 
-  if (vehicleId !== undefined) {
-    const parsedVehicleId = Number(vehicleId);
-    if (Number.isNaN(parsedVehicleId)) {
-      return res.status(400).json({ error: "vehicleId must be a number" });
+    if (vehicleId !== undefined) {
+      const parsed =
+        Number(vehicleId);
+
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          error:
+            "vehicleId must be a number",
+        });
+      }
+
+      filters.vehicleId = parsed;
     }
-    filters.vehicleId = parsedVehicleId;
-  }
 
-  if (assignedDriverId !== undefined) {
-    const parsedAssignedDriverId = Number(assignedDriverId);
-    if (Number.isNaN(parsedAssignedDriverId)) {
+    if (
+      customerAccountId !== undefined
+    ) {
+      const parsed =
+        Number(customerAccountId);
+
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          error:
+            "customerAccountId must be a number",
+        });
+      }
+
+      filters.customerAccountId =
+        parsed;
+    }
+
+    if (
+      assignedDriverId !== undefined
+    ) {
+      const parsed =
+        Number(assignedDriverId);
+
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          error:
+            "assignedDriverId must be a number",
+        });
+      }
+
+      filters.assignedDriverId =
+        parsed;
+    }
+
+    if (jobNumber !== undefined) {
+      filters.jobNumber =
+        String(jobNumber);
+    }
+
+    if (
+      agreementRef !== undefined
+    ) {
+      filters.agreementRef =
+        String(agreementRef);
+    }
+
+    if (
+      recipientName !== undefined
+    ) {
+      filters.recipientName =
+        String(recipientName);
+    }
+
+    if (
+      recipientEmail !== undefined
+    ) {
+      filters.recipientEmail =
+        String(recipientEmail);
+    }
+
+    if (status !== undefined) {
+      const parsed =
+        String(status)
+          .toUpperCase() as BookingStatus;
+
+      if (
+        !ALLOWED_STATUSES.includes(
+          parsed
+        )
+      ) {
+        return res.status(400).json({
+          error: "Invalid status",
+        });
+      }
+
+      filters.status = parsed;
+    }
+
+    const bookings =
+      await bookingsStore.getAll(
+        filters
+      );
+
+    return res.json(bookings);
+  };
+
+export const getBookingById =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    return res.json(booking);
+  };
+
+export const getBookingAuditLogs =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    const logs =
+      await auditLogsStore.getByEntity(
+        "BOOKING",
+        id
+      );
+
+    return res.json(logs);
+  };
+
+export const createBooking =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        [
+          "CUSTOMER",
+          "TRANSPORT_ADMIN",
+        ]
+      )
+    ) {
+      return;
+    }
+
+    const {
+      vehicleId,
+      customerAccountId,
+
+      jobNumber,
+      agreementRef,
+
+      recipientName,
+      recipientEmail,
+      recipientPhone,
+      recipientAddress,
+
+      requestedCollectionDate,
+    } = req.body;
+
+    if (
+      !vehicleId ||
+      !jobNumber ||
+      !agreementRef ||
+      !recipientName ||
+      !recipientEmail ||
+      !recipientPhone ||
+      !recipientAddress ||
+      !requestedCollectionDate
+    ) {
+      return res.status(400).json({
+        error:
+          "vehicleId, jobNumber, agreementRef, recipientName, recipientEmail, recipientPhone, recipientAddress and requestedCollectionDate are required",
+      });
+    }
+
+    const parsedVehicleId =
+      Number(vehicleId);
+
+    if (
+      Number.isNaN(
+        parsedVehicleId
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          "vehicleId must be a number",
+      });
+    }
+
+    let accountId: number;
+
+    if (
+      actor.role === "CUSTOMER"
+    ) {
+      if (
+        !actor.customerAccountId
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Customer user is not linked to a customer account",
+          });
+      }
+
+      accountId =
+        actor.customerAccountId;
+    } else {
+      const parsed =
+        Number(customerAccountId);
+
+      if (
+        !customerAccountId ||
+        Number.isNaN(parsed)
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "customerAccountId is required when an admin creates a booking",
+          });
+      }
+
+      accountId = parsed;
+    }
+
+    const account =
+      await customerAccountsStore.getById(
+        accountId
+      );
+
+    if (
+      !account ||
+      !account.isActive
+    ) {
       return res
         .status(400)
-        .json({ error: "assignedDriverId must be a number" });
-    }
-    filters.assignedDriverId = parsedAssignedDriverId;
-  }
-
-  if (jobNumber !== undefined) filters.jobNumber = String(jobNumber);
-  if (agreementRef !== undefined) filters.agreementRef = String(agreementRef);
-  if (customerName !== undefined) filters.customerName = String(customerName);
-  if (customerEmail !== undefined) filters.customerEmail = String(customerEmail);
-
-  if (status !== undefined) {
-    const parsedStatus = String(status).toUpperCase() as BookingStatus;
-
-    if (!ALLOWED_STATUSES.includes(parsedStatus)) {
-      return res.status(400).json({ error: "Invalid status" });
+        .json({
+          error:
+            "Customer account does not exist or is inactive",
+        });
     }
 
-    filters.status = parsedStatus;
-  }
+    const vehicle =
+      await vehiclesStore.getById(
+        parsedVehicleId
+      );
 
-  const bookings = await bookingsStore.getAll(filters);
-  return res.json(bookings);
-};
+    if (!vehicle) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Vehicle not found",
+        });
+    }
 
-export const getBookingById = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
+    if (
+      vehicle.customerAccountId !==
+      accountId
+    ) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Vehicle does not belong to this customer account",
+        });
+    }
 
-  if (id === null) {
-    return res.status(400).json({ error: "Invalid booking id" });
-  }
+    if (
+      vehicle.vehicleStatus !==
+      "SOLD"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Only SOLD vehicles can have a delivery move created",
+        });
+    }
 
-  const booking = await getBookingOr404(id, res);
+    const existing =
+      await bookingsStore
+        .hasActiveBookingForVehicle(
+          vehicle.id
+        );
 
-  if (!booking) return;
+    if (existing) {
+      return res
+        .status(409)
+        .json({
+          error:
+            "Vehicle already has an active move",
+        });
+    }
 
-  return res.json(booking);
-};
+    const dateValidation =
+      await validateCollectionDate(
+        requestedCollectionDate
+      );
 
-export const getBookingAuditLogs = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
+    if (
+      !dateValidation.valid
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            dateValidation.error,
+        });
+    }
 
-  if (id === null) {
-    return res.status(400).json({ error: "Invalid booking id" });
-  }
+    const booking =
+      await bookingsStore.create({
+        vehicleId:
+          parsedVehicleId,
 
-  const booking = await getBookingOr404(id, res);
+        customerAccountId:
+          accountId,
 
-  if (!booking) return;
+        jobNumber,
+        agreementRef,
 
-  const auditLogs = await auditLogsStore.getByEntity("BOOKING", id);
+        recipientName,
+        recipientEmail,
+        recipientPhone,
+        recipientAddress,
 
-  return res.json(auditLogs);
-};
+        requestedCollectionDate,
 
-export const createBooking = async (req: Request, res: Response) => {
-  const role = getRequestRole(req);
+        confirmedCollectionDate:
+          null,
 
-  if (!handleRoleCheck(res, role, ["CUSTOMER", "TRANSPORT_ADMIN"])) return;
+        counterProposedDate:
+          null,
 
-  const {
-    vehicleId,
-    jobNumber,
-    agreementRef,
-    customerName,
-    customerContactName,
-    customerEmail,
-    customerPhone,
-    customerAddress,
-    requestedCollectionDate,
-  } = req.body;
+        scheduledCollectionDate:
+          requestedCollectionDate,
 
-  if (
-    !vehicleId ||
-    !jobNumber ||
-    !agreementRef ||
-    !customerName ||
-    !customerContactName ||
-    !customerEmail ||
-    !customerPhone ||
-    !customerAddress ||
-    !requestedCollectionDate
-  ) {
-    return res.status(400).json({
-      error:
-        "vehicleId, jobNumber, agreementRef, customerName, customerContactName, customerEmail, customerPhone, customerAddress and requestedCollectionDate are required",
+        pendingDateChange: null,
+        dateChangeRequestedAt:
+          null,
+        dateChangeRequestedByUserId:
+          null,
+
+        status:
+          "BOOKING_PENDING",
+
+        lastCounteredBy: null,
+
+        assignedDriverId: null,
+
+        createdByUserId:
+          actor.id,
+
+        readyToCollectAt: null,
+        readyToCollectSource:
+          null,
+        readyToCollectByUserId:
+          null,
+
+        securityDriverVerifiedAt:
+          null,
+
+        securityVerifiedDriverId:
+          null,
+
+        driverCollectedAt: null,
+        securityReleasedAt: null,
+
+        securityHoldReason: null,
+        securityHoldAt: null,
+        securityHoldResolvedAt:
+          null,
+
+        driverDeliveredAt: null,
+
+        deliveryConfirmationToken:
+          null,
+
+        deliveryOtpHash: null,
+        deliveryOtpExpiresAt:
+          null,
+
+        deliveryOtpAttempts: 0,
+
+        deliveryOtpVerifiedAt:
+          null,
+
+        cancelledAt: null,
+        cancelledByUserId: null,
+        cancellationReason: null,
+      });
+
+    await createAuditLog({
+      bookingId: booking.id,
+      action:
+        "BOOKING_REQUEST_CREATED",
+      fieldName:
+        "requestedCollectionDate",
+      previousValue: null,
+      newValue:
+        requestedCollectionDate,
+      actor,
     });
-  }
 
-  const parsedVehicleId = Number(vehicleId);
+    return res
+      .status(201)
+      .json(booking);
+  };
 
-  if (Number.isNaN(parsedVehicleId)) {
-    return res.status(400).json({ error: "vehicleId must be a number" });
-  }
+export const acceptBookingDate =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
 
-  const dateValidation = await validateCollectionDate(requestedCollectionDate);
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
 
-  if (!dateValidation.valid) {
-    return res.status(400).json({ error: dateValidation.error });
-  }
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
 
-  const vehicle = await vehiclesStore.getById(parsedVehicleId);
+    if (!actor) return;
 
-  if (!vehicle) {
-    return res.status(404).json({ error: "Vehicle not found" });
-  }
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["TRANSPORT_ADMIN"]
+      )
+    ) {
+      return;
+    }
 
-  if (vehicle.vehicleStatus === "HOLD" || vehicle.vehicleStatus === "REMOVED") {
-    return res.status(400).json({
-      error: `Cannot create booking for vehicle with status ${vehicle.vehicleStatus}`,
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    const check =
+      canAcceptBookingDate(
+        actor.role,
+        booking
+      );
+
+    if (!check.allowed) {
+      return res
+        .status(403)
+        .json({
+          error: check.reason,
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "BOOKING_CONFIRMED",
+
+          confirmedCollectionDate:
+            booking.scheduledCollectionDate,
+
+          counterProposedDate:
+            null,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+      action:
+        "BOOKING_DATE_ACCEPTED",
+      fieldName: "status",
+      previousValue:
+        booking.status,
+      newValue:
+        "BOOKING_CONFIRMED",
+      actor,
     });
-  }
 
-  const actorUserIdHeader = req.header("x-user-id");
-  const createdByUserId = actorUserIdHeader ? Number(actorUserIdHeader) : null;
+    return res.json(updated);
+  };
 
-  const booking = await bookingsStore.create({
-    vehicleId: parsedVehicleId,
-    jobNumber,
-    agreementRef,
-    customerName,
-    customerContactName,
-    customerEmail,
-    customerPhone,
-    customerAddress,
-    requestedCollectionDate,
-    confirmedCollectionDate: null,
-    counterProposedDate: null,
-    dispatchDate: requestedCollectionDate,
-    status: "BOOKING_PENDING",
-    lastCounteredBy: null,
-    assignedDriverId: null,
-    createdByUserId:
-      createdByUserId && !Number.isNaN(createdByUserId)
-        ? createdByUserId
-        : null,
-    driverDelivered: false,
-    endUserDelivered: false,
-    securityRejectedReason: null,
-  });
+export const counterBookingDate =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
 
-  await createAuditLog({
-    bookingId: booking.id,
-    action: "BOOKING_REQUEST_CREATED",
-    fieldName: "requestedCollectionDate",
-    previousValue: null,
-    newValue: requestedCollectionDate,
-    req,
-  });
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
 
-  if (
-    vehicle.vehicleStatus === "AVAILABLE" ||
-    vehicle.vehicleStatus === "RESERVED"
-  ) {
-    const updatedVehicle = await vehiclesStore.updateById(vehicle.id, {
-      vehicleStatus: "SOLD",
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["TRANSPORT_ADMIN"]
+      )
+    ) {
+      return;
+    }
+
+    const {
+      counterProposedDate,
+    } = req.body;
+
+    if (!counterProposedDate) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "counterProposedDate is required",
+        });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    const check =
+      canCounterBookingDate(
+        actor.role,
+        booking
+      );
+
+    if (!check.allowed) {
+      return res
+        .status(403)
+        .json({
+          error: check.reason,
+        });
+    }
+
+    const validation =
+      await validateCollectionDate(
+        counterProposedDate,
+        id
+      );
+
+    if (!validation.valid) {
+      return res
+        .status(400)
+        .json({
+          error:
+            validation.error,
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "BOOKING_COUNTER",
+
+          lastCounteredBy:
+            actor.role,
+
+          counterProposedDate,
+
+          scheduledCollectionDate:
+            counterProposedDate,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+      action:
+        "BOOKING_DATE_COUNTERED",
+
+      fieldName:
+        "scheduledCollectionDate",
+
+      previousValue:
+        booking.scheduledCollectionDate,
+
+      newValue:
+        counterProposedDate,
+
+      actor,
     });
+
+    return res.json(updated);
+  };
+
+export const acceptCounterDate =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["CUSTOMER"]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      !customerOwnsBooking(
+        actor,
+        booking
+      )
+    ) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Booking belongs to another customer account",
+        });
+    }
+
+    const check =
+      canCustomerAcceptCounter(
+        actor.role,
+        booking
+      );
+
+    if (!check.allowed) {
+      return res
+        .status(403)
+        .json({
+          error: check.reason,
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "BOOKING_CONFIRMED",
+
+          confirmedCollectionDate:
+            booking.counterProposedDate,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+      action:
+        "CUSTOMER_ACCEPTED_COUNTER_DATE",
+
+      fieldName: "status",
+
+      previousValue:
+        booking.status,
+
+      newValue:
+        "BOOKING_CONFIRMED",
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const requestDateChange =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        [
+          "CUSTOMER",
+          "OPS_ADMIN",
+        ]
+      )
+    ) {
+      return;
+    }
+
+    const { requestedDate } =
+      req.body;
+
+    if (!requestedDate) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "requestedDate is required",
+        });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      !customerOwnsBooking(
+        actor,
+        booking
+      )
+    ) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Booking belongs to another customer account",
+        });
+    }
+
+    if (
+      booking.status !==
+        "BOOKING_CONFIRMED" &&
+      booking.status !==
+        "READY_TO_COLLECT"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Date changes can only be requested after confirmation and before collection",
+        });
+    }
+
+    if (
+      booking.driverCollectedAt ||
+      booking.securityReleasedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Date cannot be changed once collection has begun",
+        });
+    }
+
+    const validation =
+      await validateCollectionDate(
+        requestedDate,
+        id
+      );
+
+    if (!validation.valid) {
+      return res
+        .status(400)
+        .json({
+          error:
+            validation.error,
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          pendingDateChange:
+            requestedDate,
+
+          dateChangeRequestedAt:
+            new Date() as any,
+
+          dateChangeRequestedByUserId:
+            actor.id,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "DATE_CHANGE_REQUESTED",
+
+      fieldName:
+        "pendingDateChange",
+
+      previousValue:
+        booking.pendingDateChange,
+
+      newValue:
+        requestedDate,
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const confirmDateChange =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["TRANSPORT_ADMIN"]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      !booking.pendingDateChange
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "No date change is waiting for confirmation",
+        });
+    }
+
+    if (
+      booking.driverCollectedAt ||
+      booking.securityReleasedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Date cannot be changed once collection has begun",
+        });
+    }
+
+    const newDate =
+      formatDateOnly(
+        new Date(
+          booking.pendingDateChange
+        )
+      );
+
+    const validation =
+      await validateCollectionDate(
+        newDate,
+        id
+      );
+
+    if (!validation.valid) {
+      return res
+        .status(400)
+        .json({
+          error:
+            validation.error,
+        });
+    }
+
+    const previousDate =
+      booking.confirmedCollectionDate;
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          confirmedCollectionDate:
+            newDate,
+
+          scheduledCollectionDate:
+            newDate,
+
+          pendingDateChange: null,
+          dateChangeRequestedAt:
+            null,
+
+          dateChangeRequestedByUserId:
+            null,
+
+          securityDriverVerifiedAt:
+            null,
+
+          securityVerifiedDriverId:
+            null,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "DATE_CHANGE_CONFIRMED",
+
+      fieldName:
+        "confirmedCollectionDate",
+
+      previousValue:
+        previousDate,
+
+      newValue: newDate,
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const assignDriver =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["TRANSPORT_ADMIN"]
+      )
+    ) {
+      return;
+    }
+
+    const {
+      assignedDriverId,
+    } = req.body;
+
+    const driverId =
+      Number(assignedDriverId);
+
+    if (
+      !assignedDriverId ||
+      Number.isNaN(driverId)
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "assignedDriverId must be a number",
+        });
+    }
+
+    const driver =
+      await usersStore.getById(
+        driverId
+      );
+
+    if (
+      !driver ||
+      !driver.isActive ||
+      driver.role !== "DRIVER"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "assignedDriverId must belong to an active DRIVER user",
+        });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      ![
+        "BOOKING_CONFIRMED",
+        "READY_TO_COLLECT",
+        "SECURITY_HOLD",
+      ].includes(
+        booking.status
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Driver can only be assigned before the vehicle leaves site",
+        });
+    }
+
+    if (
+      booking.driverCollectedAt ||
+      booking.securityReleasedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Driver cannot be reassigned once collection has started",
+        });
+    }
+
+    const oldDriver =
+      booking.assignedDriverId;
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          assignedDriverId:
+            driverId,
+
+          // A previously verified driver is no longer valid.
+          securityDriverVerifiedAt:
+            null,
+
+          securityVerifiedDriverId:
+            null,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        oldDriver
+          ? "DRIVER_REASSIGNED"
+          : "DRIVER_ASSIGNED",
+
+      fieldName:
+        "assignedDriverId",
+
+      previousValue:
+        oldDriver,
+
+      newValue:
+        driverId,
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const markReady =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["OPS_ADMIN"]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    const check =
+      canMarkReady(
+        actor.role,
+        booking
+      );
+
+    if (!check.allowed) {
+      return res
+        .status(403)
+        .json({
+          error: check.reason,
+        });
+    }
+
+    const now = new Date();
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "READY_TO_COLLECT",
+
+          readyToCollectAt:
+            now as any,
+
+          readyToCollectSource:
+            "OPS_MANUAL",
+
+          readyToCollectByUserId:
+            actor.id,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "MARKED_READY_TO_COLLECT",
+
+      fieldName: "status",
+
+      previousValue:
+        booking.status,
+
+      newValue:
+        "READY_TO_COLLECT",
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const verifyDriverAtSecurity =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["SECURITY"]
+      )
+    ) {
+      return;
+    }
+
+    const {
+      driverId,
+    } = req.body;
+
+    const parsedDriverId =
+      Number(driverId);
+
+    if (
+      !driverId ||
+      Number.isNaN(
+        parsedDriverId
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "driverId is required",
+        });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      booking.status !==
+      "READY_TO_COLLECT"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Security can only verify a driver when the vehicle is READY_TO_COLLECT",
+        });
+    }
+
+    if (
+      !booking.assignedDriverId
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "No driver has been assigned",
+        });
+    }
+
+    if (
+      parsedDriverId !==
+      booking.assignedDriverId
+    ) {
+      return res
+        .status(409)
+        .json({
+          error:
+            "Driver does not match the assigned driver",
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          securityDriverVerifiedAt:
+            new Date() as any,
+
+          securityVerifiedDriverId:
+            parsedDriverId,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "SECURITY_DRIVER_VERIFIED",
+
+      fieldName:
+        "securityVerifiedDriverId",
+
+      previousValue:
+        booking.securityVerifiedDriverId,
+
+      newValue:
+        parsedDriverId,
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const confirmDriverCollection =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["DRIVER"]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      booking.status !==
+      "READY_TO_COLLECT"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Vehicle must be READY_TO_COLLECT",
+        });
+    }
+
+    if (
+      booking.assignedDriverId !==
+      actor.id
+    ) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Only the assigned driver can confirm collection",
+        });
+    }
+
+    if (
+      booking.securityVerifiedDriverId !==
+        actor.id ||
+      !booking.securityDriverVerifiedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Security must verify the assigned driver first",
+        });
+    }
+
+    if (
+      booking.driverCollectedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Collection has already been confirmed",
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          driverCollectedAt:
+            new Date() as any,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "DRIVER_COLLECTION_CONFIRMED",
+
+      fieldName:
+        "driverCollectedAt",
+
+      previousValue: null,
+
+      newValue:
+        new Date(),
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const placeSecurityHold =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["SECURITY"]
+      )
+    ) {
+      return;
+    }
+
+    const { reason } = req.body;
+
+    if (
+      !reason ||
+      !String(reason).trim()
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "reason is required",
+        });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      booking.status !==
+      "READY_TO_COLLECT"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Security hold can only be placed before release",
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "SECURITY_HOLD",
+
+          securityHoldReason:
+            String(reason).trim(),
+
+          securityHoldAt:
+            new Date() as any,
+
+          securityHoldResolvedAt:
+            null,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "SECURITY_HOLD_PLACED",
+
+      fieldName:
+        "securityHoldReason",
+
+      previousValue: null,
+
+      newValue:
+        String(reason).trim(),
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const resolveSecurityHold =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        [
+          "OPS_ADMIN",
+          "TRANSPORT_ADMIN",
+        ]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      booking.status !==
+      "SECURITY_HOLD"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Booking is not on security hold",
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "READY_TO_COLLECT",
+
+          securityHoldResolvedAt:
+            new Date() as any,
+
+          // Security must verify again.
+          securityDriverVerifiedAt:
+            null,
+
+          securityVerifiedDriverId:
+            null,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "SECURITY_HOLD_RESOLVED",
+
+      fieldName: "status",
+
+      previousValue:
+        "SECURITY_HOLD",
+
+      newValue:
+        "READY_TO_COLLECT",
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const releaseFromSite =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["SECURITY"]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      booking.status !==
+      "READY_TO_COLLECT"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Vehicle must be READY_TO_COLLECT",
+        });
+    }
+
+    if (
+      !booking.assignedDriverId
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "A driver must be assigned first",
+        });
+    }
+
+    if (
+      booking.securityVerifiedDriverId !==
+        booking.assignedDriverId ||
+      !booking.securityDriverVerifiedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Assigned driver has not been verified by security",
+        });
+    }
+
+    if (
+      !booking.driverCollectedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Driver must confirm collection first",
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "IN_TRANSIT",
+
+          securityReleasedAt:
+            new Date() as any,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "SECURITY_RELEASED_VEHICLE",
+
+      fieldName: "status",
+
+      previousValue:
+        booking.status,
+
+      newValue:
+        "IN_TRANSIT",
+
+      actor,
+    });
+
+    return res.json(updated);
+  };
+
+export const confirmDriverDelivered =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        ["DRIVER"]
+      )
+    ) {
+      return;
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      booking.status !==
+      "IN_TRANSIT"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Vehicle must be IN_TRANSIT before delivery can be confirmed",
+        });
+    }
+
+    if (
+      booking.assignedDriverId !==
+      actor.id
+    ) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Only the assigned driver can confirm delivery",
+        });
+    }
+
+    const otp = String(
+      randomInt(
+        100000,
+        1000000
+      )
+    );
+
+    const token =
+      randomBytes(32)
+        .toString("hex");
+
+    const otpHash =
+      await bcrypt.hash(
+        otp,
+        10
+      );
+
+    const expiresAt =
+      new Date(
+        Date.now() +
+          15 * 60 * 1000
+      );
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "DELIVERED_PENDING_CONFIRMATION",
+
+          driverDeliveredAt:
+            new Date() as any,
+
+          deliveryConfirmationToken:
+            token,
+
+          deliveryOtpHash:
+            otpHash,
+
+          deliveryOtpExpiresAt:
+            expiresAt as any,
+
+          deliveryOtpAttempts: 0,
+
+          deliveryOtpVerifiedAt:
+            null,
+        }
+      );
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "DRIVER_DELIVERY_CONFIRMED",
+
+      fieldName: "status",
+
+      previousValue:
+        booking.status,
+
+      newValue:
+        "DELIVERED_PENDING_CONFIRMATION",
+
+      actor,
+    });
+
+    /*
+      Later:
+      send OTP + confirmation URL to:
+      booking.recipientEmail
+      booking.recipientPhone
+    */
+
+    const isProduction =
+      (globalThis as any)
+        .process?.env?.NODE_ENV ===
+      "production";
+
+    if (isProduction) {
+      return res.json({
+        booking: updated,
+        message:
+          "Delivery confirmation created. OTP provider still needs to be configured.",
+      });
+    }
+
+    // Development only, so you can test before email/SMS is wired in.
+    return res.json({
+      booking: updated,
+
+      developmentConfirmation: {
+        token,
+        otp,
+        expiresAt,
+      },
+    });
+  };
+
+export const verifyDeliveryOtp =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const token =
+      req.params.token;
+
+    const { otp } =
+      req.body;
+
+    if (!token || !otp) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "token and otp are required",
+        });
+    }
+
+    const booking =
+      await bookingsStore
+        .getByDeliveryToken(
+          token
+        );
+
+    if (!booking) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Delivery confirmation not found",
+        });
+    }
+
+    if (
+      booking.status !==
+      "DELIVERED_PENDING_CONFIRMATION"
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Delivery is not awaiting recipient confirmation",
+        });
+    }
+
+    if (
+      !booking.deliveryOtpHash ||
+      !booking.deliveryOtpExpiresAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "No active OTP exists",
+        });
+    }
+
+    if (
+      booking.deliveryOtpAttempts >=
+      5
+    ) {
+      return res
+        .status(429)
+        .json({
+          error:
+            "Maximum OTP attempts reached",
+        });
+    }
+
+    if (
+      new Date(
+        booking.deliveryOtpExpiresAt
+      ) < new Date()
+    ) {
+      return res
+        .status(410)
+        .json({
+          error:
+            "OTP has expired",
+        });
+    }
+
+    const matches =
+      await bcrypt.compare(
+        String(otp),
+        booking.deliveryOtpHash
+      );
+
+    if (!matches) {
+      await bookingsStore.updateById(
+        booking.id,
+        {
+          deliveryOtpAttempts:
+            booking.deliveryOtpAttempts +
+            1,
+        }
+      );
+
+      return res
+        .status(400)
+        .json({
+          error:
+            "Incorrect OTP",
+        });
+    }
+
+    const verifiedAt =
+      new Date();
+
+    const updated =
+      await bookingsStore.updateById(
+        booking.id,
+        {
+          status: "COMPLETED",
+
+          deliveryOtpVerifiedAt:
+            verifiedAt as any,
+
+          deliveryOtpHash: null,
+
+          deliveryConfirmationToken:
+            null,
+        }
+      );
 
     await auditLogsStore.create({
-      entityType: "VEHICLE",
-      entityId: vehicle.id,
-      action: "VEHICLE_MARKED_SOLD_FROM_BOOKING_REQUEST",
-      fieldName: "vehicleStatus",
-      previousValue: vehicle.vehicleStatus,
-      newValue: updatedVehicle?.vehicleStatus ?? "SOLD",
-      ...getActor(req),
+      entityType: "BOOKING",
+
+      entityId:
+        booking.id,
+
+      action:
+        "RECIPIENT_DELIVERY_CONFIRMED",
+
+      fieldName:
+        "status",
+
+      previousValue:
+        "DELIVERED_PENDING_CONFIRMATION",
+
+      newValue:
+        "COMPLETED",
+
+      changedByUserId: null,
+      changedByRole: null,
+
+      changedByName:
+        "Recipient OTP",
     });
-  }
 
-  return res.status(201).json(booking);
-};
+    return res.json({
+      bookingId:
+        booking.id,
 
-export const acceptBookingDate = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
+      status:
+        updated?.status,
 
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canAcceptBookingDate(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  if (!booking.dispatchDate) {
-    return res.status(400).json({
-      error: "Booking has no requested dispatch date to accept",
+      confirmedAt:
+        verifiedAt,
     });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    status: "BOOKING_CONFIRMED",
-    confirmedCollectionDate: booking.dispatchDate,
-    counterProposedDate: null,
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "BOOKING_DATE_ACCEPTED",
-    fieldName: "status",
-    previousValue: booking.status,
-    newValue: "BOOKING_CONFIRMED",
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const counterBookingDate = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
-
-  const { counterProposedDate } = req.body as {
-    counterProposedDate?: string;
   };
 
-  if (!counterProposedDate) {
-    return res.status(400).json({
-      error: "counterProposedDate is required",
+export const cancelBooking =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const id = parseBookingId(req);
+
+    if (id === null) {
+      return res.status(400).json({
+        error:
+          "Invalid booking id",
+      });
+    }
+
+    const actor =
+      await getRequestUser(
+        req,
+        res
+      );
+
+    if (!actor) return;
+
+    if (
+      !handleRoleCheck(
+        res,
+        actor,
+        [
+          "CUSTOMER",
+          "TRANSPORT_ADMIN",
+        ]
+      )
+    ) {
+      return;
+    }
+
+    const {
+      reason,
+    } = req.body;
+
+    if (
+      !reason ||
+      !String(reason).trim()
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Cancellation reason is required",
+        });
+    }
+
+    const booking =
+      await getBookingOr404(
+        id,
+        res
+      );
+
+    if (!booking) return;
+
+    if (
+      !customerOwnsBooking(
+        actor,
+        booking
+      )
+    ) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Booking belongs to another customer account",
+        });
+    }
+
+    if (
+      ![
+        "BOOKING_PENDING",
+        "BOOKING_COUNTER",
+        "BOOKING_CONFIRMED",
+        "READY_TO_COLLECT",
+        "SECURITY_HOLD",
+      ].includes(
+        booking.status
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Booking can no longer be cancelled",
+        });
+    }
+
+    if (
+      booking.driverCollectedAt
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Booking cannot be cancelled after the driver has collected the vehicle",
+        });
+    }
+
+    const updated =
+      await bookingsStore.updateById(
+        id,
+        {
+          status:
+            "CANCELLED",
+
+          cancelledAt:
+            new Date() as any,
+
+          cancelledByUserId:
+            actor.id,
+
+          cancellationReason:
+            String(reason).trim(),
+        }
+      );
+
+    /*
+      No vehicle status change.
+
+      Booking creation no longer changes stock state,
+      so cancellation naturally leaves the vehicle
+      in the same imported stock state it had before.
+    */
+
+    await createAuditLog({
+      bookingId: id,
+
+      action:
+        "BOOKING_CANCELLED",
+
+      fieldName:
+        "status",
+
+      previousValue:
+        booking.status,
+
+      newValue:
+        "CANCELLED",
+
+      actor,
     });
-  }
 
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canCounterBookingDate(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  const dateValidation = await validateCollectionDate(counterProposedDate, id);
-
-  if (!dateValidation.valid) {
-    return res.status(400).json({ error: dateValidation.error });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    status: "BOOKING_COUNTER",
-    lastCounteredBy: role,
-    counterProposedDate,
-    dispatchDate: counterProposedDate,
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "BOOKING_DATE_COUNTERED",
-    fieldName: "dispatchDate",
-    previousValue: booking.dispatchDate,
-    newValue: counterProposedDate,
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const acceptCounterDate = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["CUSTOMER"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canCustomerAcceptCounter(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    status: "BOOKING_CONFIRMED",
-    confirmedCollectionDate: booking.counterProposedDate,
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "CUSTOMER_ACCEPTED_COUNTER_DATE",
-    fieldName: "status",
-    previousValue: booking.status,
-    newValue: "BOOKING_CONFIRMED",
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const assignDriver = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
-
-  const { assignedDriverId } = req.body as {
-    assignedDriverId?: number;
+    return res.json(updated);
   };
-
-  const parsedDriverId = Number(assignedDriverId);
-
-  if (!assignedDriverId || Number.isNaN(parsedDriverId)) {
-    return res.status(400).json({
-      error: "assignedDriverId is required and must be a number",
-    });
-  }
-
-  const driver = await usersStore.getById(parsedDriverId);
-
-  if (!driver || !driver.isActive || driver.role !== "DRIVER") {
-    return res.status(400).json({
-      error: "assignedDriverId must belong to an active DRIVER user",
-    });
-  }
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  if (
-    booking.status !== "BOOKING_CONFIRMED" &&
-    booking.status !== "READY_TO_COLLECT" &&
-    booking.status !== "SITE_RELEASED"
-  ) {
-    return res.status(400).json({
-      error:
-        "Driver can only be assigned when booking is BOOKING_CONFIRMED, READY_TO_COLLECT or SITE_RELEASED",
-    });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    assignedDriverId: parsedDriverId,
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "DRIVER_ASSIGNED",
-    fieldName: "assignedDriverId",
-    previousValue: booking.assignedDriverId,
-    newValue: parsedDriverId,
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const markReady = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["OPS_ADMIN"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canMarkReady(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  return updateStatusAndRespond(
-    req,
-    res,
-    booking,
-    "READY_TO_COLLECT",
-    "MARKED_READY_TO_COLLECT"
-  );
-};
-
-export const releaseFromSite = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["SECURITY"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canReleaseFromSite(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  return updateStatusAndRespond(
-    req,
-    res,
-    booking,
-    "SITE_RELEASED",
-    "SITE_RELEASED"
-  );
-};
-
-export const rejectAtSecurity = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["SECURITY"])) return;
-
-  const { reason } = req.body as {
-    reason?: string;
-  };
-
-  if (!reason || !reason.trim()) {
-    return res.status(400).json({
-      error: "reason is required",
-    });
-  }
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canRejectAtSecurity(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    status: "SECURITY_REJECTED",
-    securityRejectedReason: reason.trim(),
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "SECURITY_REJECTED_RELEASE",
-    fieldName: "securityRejectedReason",
-    previousValue: booking.securityRejectedReason,
-    newValue: reason.trim(),
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const dispatchBooking = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canDispatch(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  return updateStatusAndRespond(
-    req,
-    res,
-    booking,
-    "ADMIN_DISPATCHED",
-    "BOOKING_DISPATCHED"
-  );
-};
-
-export const startTransit = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["DRIVER"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canStartTransit(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  return updateStatusAndRespond(
-    req,
-    res,
-    booking,
-    "IN_TRANSIT",
-    "TRANSIT_STARTED"
-  );
-};
-
-export const confirmDriverDelivered = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["DRIVER"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  if (booking.status !== "IN_TRANSIT") {
-    return res.status(400).json({
-      error: "Driver delivery can only be confirmed when booking is IN_TRANSIT",
-    });
-  }
-
-  if (!booking.assignedDriverId) {
-    return res.status(400).json({
-      error: "Cannot confirm driver delivery before a driver has been assigned",
-    });
-  }
-
-  if (booking.driverDelivered) {
-    return res.status(400).json({
-      error: "Driver delivery has already been confirmed",
-    });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    driverDelivered: true,
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "DRIVER_DELIVERY_CONFIRMED",
-    fieldName: "driverDelivered",
-    previousValue: booking.driverDelivered,
-    newValue: true,
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const confirmEndUserDelivered = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["END_USER"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  if (booking.status !== "IN_TRANSIT") {
-    return res.status(400).json({
-      error: "End user delivery can only be confirmed when booking is IN_TRANSIT",
-    });
-  }
-
-  if (!booking.driverDelivered) {
-    return res.status(400).json({
-      error:
-        "End user delivery cannot be confirmed before driver delivery is confirmed",
-    });
-  }
-
-  if (booking.endUserDelivered) {
-    return res.status(400).json({
-      error: "End user delivery has already been confirmed",
-    });
-  }
-
-  const updated = await bookingsStore.updateById(id, {
-    endUserDelivered: true,
-  });
-
-  await createAuditLog({
-    bookingId: id,
-    action: "END_USER_DELIVERY_CONFIRMED",
-    fieldName: "endUserDelivered",
-    previousValue: booking.endUserDelivered,
-    newValue: true,
-    req,
-  });
-
-  return res.json(updated);
-};
-
-export const completeBooking = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const role = getRequestRole(req);
-  if (!handleRoleCheck(res, role, ["TRANSPORT_ADMIN"])) return;
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  const permissionCheck = canComplete(role!, booking);
-  if (!permissionCheck.allowed) {
-    return res.status(403).json({ error: permissionCheck.reason });
-  }
-
-  return updateStatusAndRespond(
-    req,
-    res,
-    booking,
-    "COMPLETED",
-    "BOOKING_COMPLETED"
-  );
-};
-
-export const deleteBooking = async (req: Request, res: Response) => {
-  const id = parseBookingId(req);
-  if (id === null) return res.status(400).json({ error: "Invalid booking id" });
-
-  const booking = await getBookingOr404(id, res);
-  if (!booking) return;
-
-  await createAuditLog({
-    bookingId: id,
-    action: "BOOKING_DELETED",
-    fieldName: "status",
-    previousValue: booking.status,
-    newValue: null,
-    req,
-  });
-
-  const deleted = await bookingsStore.deleteById(id);
-
-  if (!deleted) {
-    return res.status(404).json({ error: "Booking not found" });
-  }
-
-  return res.status(204).send();
-};

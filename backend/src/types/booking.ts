@@ -5,36 +5,70 @@ export type BookingStatus =
   | "BOOKING_COUNTER"
   | "BOOKING_CONFIRMED"
   | "READY_TO_COLLECT"
-  | "SITE_RELEASED"
-  | "SECURITY_REJECTED"
-  | "ADMIN_DISPATCHED"
+  | "SECURITY_HOLD"
   | "IN_TRANSIT"
-  | "COMPLETED";
+  | "DELIVERED_PENDING_CONFIRMATION"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type ReadyToCollectSource =
+  | "OPS_MANUAL"
+  | "STOCK_IMPORT";
 
 export interface Booking {
   id: number;
+
   vehicleId: number;
+  customerAccountId: number;
+
   jobNumber: string;
   agreementRef: string;
 
-  customerName: string;
-  customerContactName: string;
-  customerEmail: string;
-  customerPhone: string;
-  customerAddress: string;
+  recipientName: string;
+  recipientEmail: string;
+  recipientPhone: string;
+  recipientAddress: string;
 
   requestedCollectionDate: string;
   confirmedCollectionDate: string | null;
   counterProposedDate: string | null;
-  dispatchDate: string | null;
+  scheduledCollectionDate: string;
+
+  pendingDateChange: string | null;
+  dateChangeRequestedAt: string | null;
+  dateChangeRequestedByUserId: number | null;
 
   status: BookingStatus;
+
   lastCounteredBy: UserRole | null;
+
   assignedDriverId: number | null;
   createdByUserId: number | null;
-  driverDelivered: boolean;
-  endUserDelivered: boolean;
-  securityRejectedReason: string | null;
+
+  readyToCollectAt: string | null;
+  readyToCollectSource: ReadyToCollectSource | null;
+  readyToCollectByUserId: number | null;
+
+  securityDriverVerifiedAt: string | null;
+  securityVerifiedDriverId: number | null;
+
+  driverCollectedAt: string | null;
+  securityReleasedAt: string | null;
+
+  securityHoldReason: string | null;
+  securityHoldAt: string | null;
+  securityHoldResolvedAt: string | null;
+
+  driverDeliveredAt: string | null;
+
+  deliveryOtpExpiresAt: string | null;
+  deliveryOtpAttempts: number;
+  deliveryOtpVerifiedAt: string | null;
+
+  cancelledAt: string | null;
+  cancelledByUserId: number | null;
+  cancellationReason: string | null;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -42,10 +76,25 @@ export interface Booking {
 export type BookingFilters = {
   id?: number;
   vehicleId?: number;
+  customerAccountId?: number;
+
   jobNumber?: string;
   agreementRef?: string;
-  customerName?: string;
-  customerEmail?: string;
+
+  recipientName?: string;
+  recipientEmail?: string;
+
   status?: BookingStatus;
   assignedDriverId?: number;
 };
+
+export type CreateBookingInput = Omit<
+  Booking,
+  "id" | "createdAt" | "updatedAt"
+> & {
+  deliveryOtpHash: string | null;
+  deliveryConfirmationToken: string | null;
+};
+
+export type BookingUpdateInput =
+  Partial<CreateBookingInput>;

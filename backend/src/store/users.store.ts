@@ -1,5 +1,10 @@
 const { prisma } = require("../lib/prisma");
-import type { RegisterUserInput, User, UserWithPassword } from "../types/user";
+
+import type {
+  RegisterUserInput,
+  User,
+  UserWithPassword,
+} from "../types/user";
 
 const publicUserSelect = {
   id: true,
@@ -8,6 +13,7 @@ const publicUserSelect = {
   email: true,
   role: true,
   isActive: true,
+  customerAccountId: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -29,7 +35,9 @@ export const usersStore = {
     });
   },
 
-  async getByIdWithPassword(id: number): Promise<UserWithPassword | null> {
+  async getByIdWithPassword(
+    id: number
+  ): Promise<UserWithPassword | null> {
     return prisma.user.findUnique({
       where: { id },
     });

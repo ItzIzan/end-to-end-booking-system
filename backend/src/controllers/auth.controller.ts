@@ -1,8 +1,12 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
+
 import { auditLogsStore } from "../store/auditLogs.store";
+import { customerAccountsStore } from "../store/customerAccounts.store";
 import { usersStore } from "../store/users.store";
+
 import type { UserRole } from "../types/user";
+
 import { isUserRole } from "../utils/bookingPermissions";
 
 function isValidEmail(email: string): boolean {
@@ -20,6 +24,7 @@ function publicUser(user: {
   email: string;
   role: UserRole;
   isActive: boolean;
+  customerAccountId: number | null;
   createdAt: string;
   updatedAt: string;
 }) {
@@ -30,23 +35,42 @@ function publicUser(user: {
     email: user.email,
     role: user.role,
     isActive: user.isActive,
+    customerAccountId: user.customerAccountId,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
 }
 
-export const register = async (req: Request, res: Response) => {
-  const { name, username, email, password, role } = req.body as {
+export const register = async (
+  req: Request,
+  res: Response
+) => {
+  const {
+    name,
+    username,
+    email,
+    password,
+    role,
+    customerAccountId,
+  } = req.body as {
     name?: string;
     username?: string;
     email?: string;
     password?: string;
     role?: UserRole;
+    customerAccountId?: number;
   };
 
-  if (!name || !username || !email || !password || !role) {
+  if (
+    !name ||
+    !username ||
+    !email ||
+    !password ||
+    !role
+  ) {
     return res.status(400).json({
-      error: "name, username, email, password and role are required",
+      error:
+        "name, username, email, password and role are required",
     });
   }
 
@@ -65,35 +89,84 @@ export const register = async (req: Request, res: Response) => {
 
   if (password.length < 8) {
     return res.status(400).json({
-      error: "password must be at least 8 characters",
+      error:
+        "password must be at least 8 characters",
     });
   }
 
   if (!isUserRole(role)) {
     return res.status(400).json({
       error:
-        "Invalid role. Allowed roles: SYSTEM_ADMIN, CUSTOMER, TRANSPORT_ADMIN, OPS_ADMIN, SECURITY, DRIVER, END_USER",
+        "Invalid role. Allowed roles: SYSTEM_ADMIN, CUSTOMER, TRANSPORT_ADMIN, OPS_ADMIN, SECURITY, DRIVER",
     });
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  let parsedCustomerAccountId: number | null =
+    null;
+
+  /*
+   * CUSTOMER users must belong to a customer account.
+   * Internal users do not.
+   */
+  if (role === "CUSTOMER") {
+    parsedCustomerAccountId =
+      Number(customerAccountId);
+
+    if (
+      !customerAccountId ||
+      Number.isNaN(parsedCustomerAccountId)
+    ) {
+      return res.status(400).json({
+        error:
+          "customerAccountId is required for CUSTOMER users",
+      });
+    }
+
+    const customerAccount =
+      await customerAccountsStore.getById(
+        parsedCustomerAccountId
+      );
+
+    if (
+      !customerAccount ||
+      !customerAccount.isActive
+    ) {
+      return res.status(400).json({
+        error:
+          "Customer account does not exist or is inactive",
+      });
+    }
+  }
+
+  const passwordHash =
+    await bcrypt.hash(password, 10);
 
   try {
-    const user = await usersStore.create({
-      name,
-      username,
-      email,
-      passwordHash,
-      role,
-    });
+    const user =
+      await usersStore.create({
+        name,
+        username,
+        email,
+        passwordHash,
+        role,
+
+        customerAccountId:
+          role === "CUSTOMER"
+            ? parsedCustomerAccountId
+            : null,
+      });
 
     await auditLogsStore.create({
       entityType: "USER",
       entityId: user.id,
+
       action: "USER_REGISTERED",
+
       fieldName: "role",
+
       previousValue: null,
       newValue: user.role,
+
       changedByUserId: user.id,
       changedByRole: user.role,
       changedByName: user.name,
@@ -105,41 +178,70 @@ export const register = async (req: Request, res: Response) => {
   } catch (error: any) {
     if (error?.code === "P2002") {
       return res.status(409).json({
-        error: "email or username already exists",
+        error:
+          "email or username already exists",
       });
     }
 
+    console.error(
+      "Failed to register user:",
+      error
+    );
+
     return res.status(500).json({
-      error: "Failed to register user",
+      error:
+        "Failed to register user",
     });
   }
 };
 
-export const login = async (req: Request, res: Response) => {
-  const { emailOrUsername, password } = req.body as {
+export const login = async (
+  req: Request,
+  res: Response
+) => {
+  const {
+    emailOrUsername,
+    password,
+  } = req.body as {
     emailOrUsername?: string;
     password?: string;
   };
 
-  if (!emailOrUsername || !password) {
+  if (
+    !emailOrUsername ||
+    !password
+  ) {
     return res.status(400).json({
-      error: "emailOrUsername and password are required",
+      error:
+        "emailOrUsername and password are required",
     });
   }
 
-  const user = await usersStore.findByEmailOrUsername(emailOrUsername);
+  const user =
+    await usersStore.findByEmailOrUsername(
+      emailOrUsername
+    );
 
-  if (!user || !user.isActive) {
+  if (
+    !user ||
+    !user.isActive
+  ) {
     return res.status(401).json({
-      error: "Invalid login details",
+      error:
+        "Invalid login details",
     });
   }
 
-  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+  const passwordMatches =
+    await bcrypt.compare(
+      password,
+      user.passwordHash
+    );
 
   if (!passwordMatches) {
     return res.status(401).json({
-      error: "Invalid login details",
+      error:
+        "Invalid login details",
     });
   }
 
@@ -148,28 +250,40 @@ export const login = async (req: Request, res: Response) => {
   });
 };
 
-export const getMe = async (req: Request, res: Response) => {
-  const userIdHeader = req.header("x-user-id");
+export const getMe = async (
+  req: Request,
+  res: Response
+) => {
+  const userIdHeader =
+    req.header("x-user-id");
 
   if (!userIdHeader) {
     return res.status(401).json({
-      error: "Missing x-user-id header",
+      error:
+        "Missing x-user-id header",
     });
   }
 
-  const userId = Number(userIdHeader);
+  const userId =
+    Number(userIdHeader);
 
   if (Number.isNaN(userId)) {
     return res.status(400).json({
-      error: "x-user-id must be a number",
+      error:
+        "x-user-id must be a number",
     });
   }
 
-  const user = await usersStore.getById(userId);
+  const user =
+    await usersStore.getById(userId);
 
-  if (!user || !user.isActive) {
+  if (
+    !user ||
+    !user.isActive
+  ) {
     return res.status(401).json({
-      error: "User not found or inactive",
+      error:
+        "User not found or inactive",
     });
   }
 
