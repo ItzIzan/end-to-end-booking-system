@@ -1,10 +1,10 @@
-# Node
-backend/node_modules
-backend/dist
+node_modules/
+backend/node_modules/
+frontend/node_modules/
 
-# Env files
 .env
-
+dist/
+build/
 # OS
 .DS_Store
 Thumbs.db

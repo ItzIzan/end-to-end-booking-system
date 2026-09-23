@@ -92,23 +92,14 @@ model User {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  customerAccount CustomerAccount? @relation(
-    fields: [customerAccountId],
-    references: [id]
-  )
+  customerAccount CustomerAccount? @relation(fields: [customerAccountId], references: [id])
 
-  assignedBookings Booking[] @relation("AssignedDriver")
-  createdBookings Booking[] @relation("CreatedByUser")
-
-  readyMarkedBookings Booking[] @relation("ReadyMarkedBy")
-
-  dateChangeRequestedBookings Booking[]
-    @relation("DateChangeRequestedBy")
-
-  cancelledBookings Booking[] @relation("CancelledBy")
-
-  securityVerifiedBookings Booking[]
-    @relation("SecurityVerifiedDriver")
+  assignedBookings            Booking[] @relation("AssignedDriver")
+  createdBookings             Booking[] @relation("CreatedByUser")
+  readyMarkedBookings         Booking[] @relation("ReadyMarkedBy")
+  dateChangeRequestedBookings Booking[] @relation("DateChangeRequestedBy")
+  cancelledBookings           Booking[] @relation("CancelledBy")
+  securityVerifiedBookings    Booking[] @relation("SecurityVerifiedDriver")
 
   auditLogs              AuditLog[]
   bookingSettingsUpdates BookingSettings[]
@@ -128,7 +119,7 @@ model Site {
 }
 
 model Vehicle {
-  id                Int           @id @default(autoincrement())
+  id                Int @id @default(autoincrement())
   siteId            Int
   customerAccountId Int
 
@@ -146,9 +137,6 @@ model Vehicle {
 
   vehicleStatus VehicleStatus @default(AVAILABLE)
 
-  // Imported operational status from the stocklist.
-  // e.g. IN WORK, REFURB COMPLETE, OUTBOUND.
-  // Kept as String for now because we have not mapped every real stocklist state yet.
   stockStage String?
 
   source VehicleSource @default(MANUAL)
@@ -156,15 +144,8 @@ model Vehicle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  site Site @relation(
-    fields: [siteId],
-    references: [id]
-  )
-
-  customerAccount CustomerAccount @relation(
-    fields: [customerAccountId],
-    references: [id]
-  )
+  site            Site            @relation(fields: [siteId], references: [id])
+  customerAccount CustomerAccount @relation(fields: [customerAccountId], references: [id])
 
   bookings Booking[]
 
@@ -184,28 +165,18 @@ model Booking {
   jobNumber    String @unique
   agreementRef String
 
-  // End customer / recipient.
-  // This is NOT the customer account using the platform.
   recipientName    String
   recipientEmail   String
   recipientPhone   String
   recipientAddress String
 
-  // Initial requested date.
   requestedCollectionDate DateTime
-
-  // Final agreed date.
   confirmedCollectionDate DateTime?
-
-  // Driver Admin counter offer during initial booking.
-  counterProposedDate DateTime?
-
-  // Current date which holds a slot.
+  counterProposedDate     DateTime?
   scheduledCollectionDate DateTime
 
-  // Used when a confirmed booking wants to change date.
-  pendingDateChange       DateTime?
-  dateChangeRequestedAt   DateTime?
+  pendingDateChange           DateTime?
+  dateChangeRequestedAt       DateTime?
   dateChangeRequestedByUserId Int?
 
   status BookingStatus @default(BOOKING_PENDING)
@@ -215,84 +186,48 @@ model Booking {
   assignedDriverId Int?
   createdByUserId  Int?
 
-  // Vehicle readiness.
   readyToCollectAt       DateTime?
   readyToCollectSource   ReadyToCollectSource?
   readyToCollectByUserId Int?
 
-  // Collection / security.
   securityDriverVerifiedAt DateTime?
   securityVerifiedDriverId Int?
 
-  driverCollectedAt DateTime?
+  driverCollectedAt  DateTime?
   securityReleasedAt DateTime?
 
   securityHoldReason     String?
   securityHoldAt         DateTime?
   securityHoldResolvedAt DateTime?
 
-  // Delivery.
   driverDeliveredAt DateTime?
 
-  deliveryConfirmationToken String? @unique
-  deliveryOtpHash            String?
-  deliveryOtpExpiresAt       DateTime?
-  deliveryOtpAttempts        Int     @default(0)
-  deliveryOtpVerifiedAt      DateTime?
+  deliveryConfirmationToken String?   @unique
+  deliveryOtpHash           String?
+  deliveryOtpExpiresAt      DateTime?
+  deliveryOtpAttempts       Int       @default(0)
+  deliveryOtpVerifiedAt     DateTime?
 
-  // Cancellation.
-  cancelledAt       DateTime?
-  cancelledByUserId Int?
+  cancelledAt        DateTime?
+  cancelledByUserId  Int?
   cancellationReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  vehicle Vehicle @relation(
-    fields: [vehicleId],
-    references: [id]
-  )
+  vehicle         Vehicle         @relation(fields: [vehicleId], references: [id])
+  customerAccount CustomerAccount @relation(fields: [customerAccountId], references: [id])
 
-  customerAccount CustomerAccount @relation(
-    fields: [customerAccountId],
-    references: [id]
-  )
+  assignedDriver User? @relation("AssignedDriver", fields: [assignedDriverId], references: [id])
+  createdByUser  User? @relation("CreatedByUser", fields: [createdByUserId], references: [id])
 
-  assignedDriver User? @relation(
-    "AssignedDriver",
-    fields: [assignedDriverId],
-    references: [id]
-  )
+  readyToCollectByUser User? @relation("ReadyMarkedBy", fields: [readyToCollectByUserId], references: [id])
 
-  createdByUser User? @relation(
-    "CreatedByUser",
-    fields: [createdByUserId],
-    references: [id]
-  )
+  dateChangeRequestedByUser User? @relation("DateChangeRequestedBy", fields: [dateChangeRequestedByUserId], references: [id])
 
-  readyToCollectByUser User? @relation(
-    "ReadyMarkedBy",
-    fields: [readyToCollectByUserId],
-    references: [id]
-  )
+  cancelledByUser User? @relation("CancelledBy", fields: [cancelledByUserId], references: [id])
 
-  dateChangeRequestedByUser User? @relation(
-    "DateChangeRequestedBy",
-    fields: [dateChangeRequestedByUserId],
-    references: [id]
-  )
-
-  cancelledByUser User? @relation(
-    "CancelledBy",
-    fields: [cancelledByUserId],
-    references: [id]
-  )
-
-  securityVerifiedDriver User? @relation(
-    "SecurityVerifiedDriver",
-    fields: [securityVerifiedDriverId],
-    references: [id]
-  )
+  securityVerifiedDriver User? @relation("SecurityVerifiedDriver", fields: [securityVerifiedDriverId], references: [id])
 
   @@index([vehicleId])
   @@index([customerAccountId])
@@ -311,10 +246,7 @@ model BookingSettings {
   updatedByUserId Int?
   updatedAt       DateTime @updatedAt
 
-  updatedByUser User? @relation(
-    fields: [updatedByUserId],
-    references: [id]
-  )
+  updatedByUser User? @relation(fields: [updatedByUserId], references: [id])
 }
 
 model AuditLog {
@@ -333,10 +265,7 @@ model AuditLog {
 
   createdAt DateTime @default(now())
 
-  changedByUser User? @relation(
-    fields: [changedByUserId],
-    references: [id]
-  )
+  changedByUser User? @relation(fields: [changedByUserId], references: [id])
 
   @@index([entityType, entityId])
   @@index([changedByUserId])

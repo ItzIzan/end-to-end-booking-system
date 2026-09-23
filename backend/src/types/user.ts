@@ -29,3 +29,4 @@ export interface RegisterUserInput {
   passwordHash: string;
   role: UserRole;
   customerAccountId?: number | null;
+}

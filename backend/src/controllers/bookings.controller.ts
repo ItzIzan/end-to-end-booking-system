@@ -2305,8 +2305,9 @@ export const verifyDeliveryOtp =
     req: Request,
     res: Response
   ) => {
-    const token =
-      req.params.token;
+    const token = String(
+      req.params.token
+  );
 
     const { otp } =
       req.body;
