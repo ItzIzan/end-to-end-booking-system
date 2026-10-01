@@ -123,7 +123,8 @@ export const getBookingAvailability = async (req: Request, res: Response) => {
   const settings = await bookingSettingsStore.get();
   const earliestDate = getEarliestCollectionDate(new Date(), settings);
 
-  const bookingsForDate = await bookingsStore.countByDispatchDate(
+  const bookingsForDate =
+  await bookingsStore.countByScheduledCollectionDate(
     requestedDate
   );
 

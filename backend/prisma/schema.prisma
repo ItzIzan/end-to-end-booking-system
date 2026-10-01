@@ -111,7 +111,7 @@ model User {
 
   evidenceUploads            BookingEvidence[]
   stockImportProfilesCreated StockImportProfile[] @relation("StockImportProfileCreatedBy")
-  stockImportBatchesUploaded StockImportBatch[] @relation("StockImportBatchUploadedBy")
+  stockImportBatchesUploaded StockImportBatch[]   @relation("StockImportBatchUploadedBy")
 
   auditLogs              AuditLog[]
   bookingSettingsUpdates BookingSettings[]
@@ -285,7 +285,7 @@ model StockImportProfile {
 }
 
 model StockImportBatch {
-  id                Int      @id @default(autoincrement())
+  id                Int  @id @default(autoincrement())
   customerAccountId Int
   profileId         Int?
 
