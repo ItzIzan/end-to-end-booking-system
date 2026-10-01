@@ -1,0 +1,2 @@
+export const MIN_EVIDENCE_IMAGES = 4;
+export const MAX_EVIDENCE_IMAGES_PER_UPLOAD = 20;

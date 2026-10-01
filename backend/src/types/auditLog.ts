@@ -6,7 +6,9 @@ export type AuditEntityType =
   | "SITE"
   | "VEHICLE"
   | "BOOKING"
-  | "BOOKING_SETTINGS";
+  | "BOOKING_SETTINGS"
+  | "STOCK_IMPORT_PROFILE"
+  | "STOCK_IMPORT_BATCH";
 
 export interface AuditLog {
   id: number;
@@ -23,4 +25,7 @@ export interface AuditLog {
 }
 
 export type CreateAuditLogInput =
-  Omit<AuditLog, "id" | "createdAt">;
+  Omit<
+    AuditLog,
+    "id" | "createdAt"
+  >;

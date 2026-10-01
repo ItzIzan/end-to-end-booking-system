@@ -53,6 +53,11 @@ enum ReadyToCollectSource {
   STOCK_IMPORT
 }
 
+enum BookingEvidenceType {
+  POC
+  POD
+}
+
 enum AuditEntityType {
   USER
   CUSTOMER_ACCOUNT
@@ -60,6 +65,8 @@ enum AuditEntityType {
   VEHICLE
   BOOKING
   BOOKING_SETTINGS
+  STOCK_IMPORT_PROFILE
+  STOCK_IMPORT_BATCH
 }
 
 model CustomerAccount {
@@ -73,9 +80,10 @@ model CustomerAccount {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  users    User[]
-  vehicles Vehicle[]
-  bookings Booking[]
+  users              User[]
+  vehicles           Vehicle[]
+  bookings           Booking[]
+  stockImportBatches StockImportBatch[]
 
   @@index([companyName])
 }
@@ -100,6 +108,10 @@ model User {
   dateChangeRequestedBookings Booking[] @relation("DateChangeRequestedBy")
   cancelledBookings           Booking[] @relation("CancelledBy")
   securityVerifiedBookings    Booking[] @relation("SecurityVerifiedDriver")
+
+  evidenceUploads            BookingEvidence[]
+  stockImportProfilesCreated StockImportProfile[] @relation("StockImportProfileCreatedBy")
+  stockImportBatchesUploaded StockImportBatch[] @relation("StockImportBatchUploadedBy")
 
   auditLogs              AuditLog[]
   bookingSettingsUpdates BookingSettings[]
@@ -136,18 +148,15 @@ model Vehicle {
   motExpiryDate    DateTime
 
   vehicleStatus VehicleStatus @default(AVAILABLE)
-
-  stockStage String?
-
-  source VehicleSource @default(MANUAL)
+  stockStage    String?
+  source        VehicleSource @default(MANUAL)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   site            Site            @relation(fields: [siteId], references: [id])
   customerAccount CustomerAccount @relation(fields: [customerAccountId], references: [id])
-
-  bookings Booking[]
+  bookings        Booking[]
 
   @@index([reg])
   @@index([vehicleStatus])
@@ -179,8 +188,7 @@ model Booking {
   dateChangeRequestedAt       DateTime?
   dateChangeRequestedByUserId Int?
 
-  status BookingStatus @default(BOOKING_PENDING)
-
+  status          BookingStatus @default(BOOKING_PENDING)
   lastCounteredBy UserRole?
 
   assignedDriverId Int?
@@ -229,12 +237,84 @@ model Booking {
 
   securityVerifiedDriver User? @relation("SecurityVerifiedDriver", fields: [securityVerifiedDriverId], references: [id])
 
+  evidence BookingEvidence[]
+
   @@index([vehicleId])
   @@index([customerAccountId])
   @@index([status])
   @@index([assignedDriverId])
   @@index([scheduledCollectionDate])
   @@index([requestedCollectionDate])
+}
+
+model BookingEvidence {
+  id        Int                 @id @default(autoincrement())
+  bookingId Int
+  type      BookingEvidenceType
+
+  originalFileName String
+  storageKey       String
+  mimeType         String
+  fileSize         Int
+
+  uploadedByUserId Int
+  uploadedAt       DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  uploadedBy User @relation(fields: [uploadedByUserId], references: [id])
+
+  @@index([bookingId])
+  @@index([bookingId, type])
+  @@index([uploadedByUserId])
+}
+
+model StockImportProfile {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  sheetName       String?
+  headerRowNumber Int      @default(1)
+  columnMapping   Json
+  createdByUserId Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  createdByUser User? @relation("StockImportProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  batches StockImportBatch[]
+}
+
+model StockImportBatch {
+  id                Int      @id @default(autoincrement())
+  customerAccountId Int
+  profileId         Int?
+
+  originalFileName String
+  sheetName        String
+  headerRowNumber  Int
+  columnMapping    Json
+
+  rowsProcessed Int
+  rowsCreated   Int
+  rowsUpdated   Int
+  rowsUnchanged Int
+  rowsFailed    Int
+
+  errors Json?
+
+  uploadedByUserId Int?
+
+  createdAt DateTime @default(now())
+
+  customerAccount CustomerAccount @relation(fields: [customerAccountId], references: [id])
+
+  profile StockImportProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  uploadedByUser User? @relation("StockImportBatchUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([customerAccountId])
+  @@index([profileId])
+  @@index([createdAt])
 }
 
 model BookingSettings {

@@ -1,12 +1,10 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import { randomBytes, randomInt } from "crypto";
 
-const {
-  randomBytes,
-  randomInt,
-} = require("crypto");
-
+import { MIN_EVIDENCE_IMAGES } from "../constants/bookingEvidence";
 import { auditLogsStore } from "../store/auditLogs.store";
+import { bookingEvidenceStore } from "../store/bookingEvidence.store";
 import { bookingSettingsStore } from "../store/bookingSettings.store";
 import { bookingsStore } from "../store/bookings.store";
 import { customerAccountsStore } from "../store/customerAccounts.store";
@@ -18,7 +16,6 @@ import type {
   BookingFilters,
   BookingStatus,
 } from "../types/booking";
-
 import type { User } from "../types/user";
 
 import {
@@ -28,7 +25,6 @@ import {
   canMarkReady,
   requireRole,
 } from "../utils/bookingPermissions";
-
 import {
   formatDateOnly,
   getEarliestCollectionDate,
@@ -48,11 +44,8 @@ const ALLOWED_STATUSES: BookingStatus[] = [
   "CANCELLED",
 ];
 
-function parseBookingId(
-  req: Request
-): number | null {
+function parseBookingId(req: Request): number | null {
   const id = Number(req.params.id);
-
   return Number.isNaN(id) ? null : id;
 }
 
@@ -117,14 +110,14 @@ async function getRequestUser(
 function handleRoleCheck(
   res: Response,
   user: User,
-  allowedRoles: Parameters<
-    typeof requireRole
-  >[1]
+  allowedRoles:
+    Parameters<typeof requireRole>[1]
 ): boolean {
-  const check = requireRole(
-    user.role,
-    allowedRoles
-  );
+  const check =
+    requireRole(
+      user.role,
+      allowedRoles
+    );
 
   if (!check.allowed) {
     res.status(403).json({
@@ -150,29 +143,39 @@ function toAuditValue(
   return String(value);
 }
 
-async function createAuditLog(input: {
-  bookingId: number;
-  action: string;
-  fieldName?: string | null;
-  previousValue?: unknown;
-  newValue?: unknown;
-  actor: User;
-}) {
+async function createAuditLog(
+  input: {
+    bookingId: number;
+    action: string;
+    fieldName?: string | null;
+    previousValue?: unknown;
+    newValue?: unknown;
+    actor: User;
+  }
+) {
   await auditLogsStore.create({
-    entityType: "BOOKING",
-    entityId: input.bookingId,
-    action: input.action,
+    entityType:
+      "BOOKING",
+
+    entityId:
+      input.bookingId,
+
+    action:
+      input.action,
 
     fieldName:
-      input.fieldName ?? null,
+      input.fieldName ??
+      null,
 
-    previousValue: toAuditValue(
-      input.previousValue
-    ),
+    previousValue:
+      toAuditValue(
+        input.previousValue
+      ),
 
-    newValue: toAuditValue(
-      input.newValue
-    ),
+    newValue:
+      toAuditValue(
+        input.newValue
+      ),
 
     changedByUserId:
       input.actor.id,
@@ -199,12 +202,15 @@ async function validateCollectionDate(
     }
 > {
   const parsedDate =
-    parseDateOnly(dateString);
+    parseDateOnly(
+      dateString
+    );
 
   if (!parsedDate) {
     return {
       valid: false,
-      error: "Date must be YYYY-MM-DD",
+      error:
+        "Date must be YYYY-MM-DD",
     };
   }
 
@@ -220,6 +226,7 @@ async function validateCollectionDate(
   ) {
     return {
       valid: false,
+
       error:
         `Date is not available. Earliest allowed working day is ` +
         `${formatDateOnly(
@@ -244,10 +251,12 @@ async function validateCollectionDate(
           );
 
   if (
-    count >= settings.dailySlotLimit
+    count >=
+    settings.dailySlotLimit
   ) {
     return {
       valid: false,
+
       error:
         `No slots are available for ${dateString}. ` +
         `Daily limit is ${settings.dailySlotLimit}`,
@@ -288,42 +297,67 @@ export const getBookings =
       assignedDriverId,
     } = req.query;
 
-    const filters: BookingFilters = {};
+    const filters:
+      BookingFilters =
+      {};
 
     if (id !== undefined) {
-      const parsed = Number(id);
+      const parsed =
+        Number(id);
 
-      if (Number.isNaN(parsed)) {
+      if (
+        Number.isNaN(
+          parsed
+        )
+      ) {
         return res.status(400).json({
           error:
             "id must be a number",
         });
       }
 
-      filters.id = parsed;
+      filters.id =
+        parsed;
     }
 
-    if (vehicleId !== undefined) {
+    if (
+      vehicleId !==
+      undefined
+    ) {
       const parsed =
-        Number(vehicleId);
+        Number(
+          vehicleId
+        );
 
-      if (Number.isNaN(parsed)) {
+      if (
+        Number.isNaN(
+          parsed
+        )
+      ) {
         return res.status(400).json({
           error:
             "vehicleId must be a number",
         });
       }
 
-      filters.vehicleId = parsed;
+      filters.vehicleId =
+        parsed;
     }
 
     if (
-      customerAccountId !== undefined
+      customerAccountId !==
+      undefined
     ) {
       const parsed =
-        Number(customerAccountId);
+        Number(
+          customerAccountId
+        );
 
-      if (Number.isNaN(parsed)) {
+      if (
+        Number.isNaN(
+          parsed
+        )
+      ) {
         return res.status(400).json({
           error:
             "customerAccountId must be a number",
@@ -335,12 +369,19 @@ export const getBookings =
     }
 
     if (
-      assignedDriverId !== undefined
+      assignedDriverId !==
+      undefined
     ) {
       const parsed =
-        Number(assignedDriverId);
+        Number(
+          assignedDriverId
+        );
 
-      if (Number.isNaN(parsed)) {
+      if (
+        Number.isNaN(
+          parsed
+        )
+      ) {
         return res.status(400).json({
           error:
             "assignedDriverId must be a number",
@@ -351,36 +392,54 @@ export const getBookings =
         parsed;
     }
 
-    if (jobNumber !== undefined) {
+    if (
+      jobNumber !==
+      undefined
+    ) {
       filters.jobNumber =
-        String(jobNumber);
+        String(
+          jobNumber
+        );
     }
 
     if (
-      agreementRef !== undefined
+      agreementRef !==
+      undefined
     ) {
       filters.agreementRef =
-        String(agreementRef);
+        String(
+          agreementRef
+        );
     }
 
     if (
-      recipientName !== undefined
+      recipientName !==
+      undefined
     ) {
       filters.recipientName =
-        String(recipientName);
+        String(
+          recipientName
+        );
     }
 
     if (
-      recipientEmail !== undefined
+      recipientEmail !==
+      undefined
     ) {
       filters.recipientEmail =
-        String(recipientEmail);
+        String(
+          recipientEmail
+        );
     }
 
-    if (status !== undefined) {
+    if (
+      status !==
+      undefined
+    ) {
       const parsed =
-        String(status)
-          .toUpperCase() as BookingStatus;
+        String(
+          status
+        ).toUpperCase() as BookingStatus;
 
       if (
         !ALLOWED_STATUSES.includes(
@@ -388,19 +447,20 @@ export const getBookings =
         )
       ) {
         return res.status(400).json({
-          error: "Invalid status",
+          error:
+            "Invalid status",
         });
       }
 
-      filters.status = parsed;
+      filters.status =
+        parsed;
     }
 
-    const bookings =
+    return res.json(
       await bookingsStore.getAll(
         filters
-      );
-
-    return res.json(bookings);
+      )
+    );
   };
 
 export const getBookingById =
@@ -408,7 +468,8 @@ export const getBookingById =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -425,7 +486,9 @@ export const getBookingById =
 
     if (!booking) return;
 
-    return res.json(booking);
+    return res.json(
+      booking
+    );
   };
 
 export const getBookingAuditLogs =
@@ -433,7 +496,8 @@ export const getBookingAuditLogs =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -450,13 +514,12 @@ export const getBookingAuditLogs =
 
     if (!booking) return;
 
-    const logs =
+    return res.json(
       await auditLogsStore.getByEntity(
         "BOOKING",
         id
-      );
-
-    return res.json(logs);
+      )
+    );
   };
 
 export const createBooking =
@@ -488,15 +551,12 @@ export const createBooking =
     const {
       vehicleId,
       customerAccountId,
-
       jobNumber,
       agreementRef,
-
       recipientName,
       recipientEmail,
       recipientPhone,
       recipientAddress,
-
       requestedCollectionDate,
     } = req.body;
 
@@ -517,7 +577,9 @@ export const createBooking =
     }
 
     const parsedVehicleId =
-      Number(vehicleId);
+      Number(
+        vehicleId
+      );
 
     if (
       Number.isNaN(
@@ -533,38 +595,40 @@ export const createBooking =
     let accountId: number;
 
     if (
-      actor.role === "CUSTOMER"
+      actor.role ===
+      "CUSTOMER"
     ) {
       if (
         !actor.customerAccountId
       ) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "Customer user is not linked to a customer account",
-          });
+        return res.status(400).json({
+          error:
+            "Customer user is not linked to a customer account",
+        });
       }
 
       accountId =
         actor.customerAccountId;
     } else {
       const parsed =
-        Number(customerAccountId);
+        Number(
+          customerAccountId
+        );
 
       if (
         !customerAccountId ||
-        Number.isNaN(parsed)
+        Number.isNaN(
+          parsed
+        )
       ) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "customerAccountId is required when an admin creates a booking",
-          });
+        return res.status(400).json({
+          error:
+            "customerAccountId is required when an admin creates a booking",
+        });
       }
 
-      accountId = parsed;
+      accountId =
+        parsed;
     }
 
     const account =
@@ -576,12 +640,10 @@ export const createBooking =
       !account ||
       !account.isActive
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Customer account does not exist or is inactive",
-        });
+      return res.status(400).json({
+        error:
+          "Customer account does not exist or is inactive",
+      });
     }
 
     const vehicle =
@@ -590,51 +652,41 @@ export const createBooking =
       );
 
     if (!vehicle) {
-      return res
-        .status(404)
-        .json({
-          error:
-            "Vehicle not found",
-        });
+      return res.status(404).json({
+        error:
+          "Vehicle not found",
+      });
     }
 
     if (
       vehicle.customerAccountId !==
       accountId
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Vehicle does not belong to this customer account",
-        });
+      return res.status(403).json({
+        error:
+          "Vehicle does not belong to this customer account",
+      });
     }
 
     if (
       vehicle.vehicleStatus !==
       "SOLD"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Only SOLD vehicles can have a delivery move created",
-        });
+      return res.status(400).json({
+        error:
+          "Only SOLD vehicles can have a delivery move created",
+      });
     }
 
-    const existing =
-      await bookingsStore
-        .hasActiveBookingForVehicle(
-          vehicle.id
-        );
-
-    if (existing) {
-      return res
-        .status(409)
-        .json({
-          error:
-            "Vehicle already has an active move",
-        });
+    if (
+      await bookingsStore.hasActiveBookingForVehicle(
+        vehicle.id
+      )
+    ) {
+      return res.status(409).json({
+        error:
+          "Vehicle already has an active move",
+      });
     }
 
     const dateValidation =
@@ -645,12 +697,10 @@ export const createBooking =
     if (
       !dateValidation.valid
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            dateValidation.error,
-        });
+      return res.status(400).json({
+        error:
+          dateValidation.error,
+      });
     }
 
     const booking =
@@ -680,25 +730,33 @@ export const createBooking =
         scheduledCollectionDate:
           requestedCollectionDate,
 
-        pendingDateChange: null,
+        pendingDateChange:
+          null,
+
         dateChangeRequestedAt:
           null,
+
         dateChangeRequestedByUserId:
           null,
 
         status:
           "BOOKING_PENDING",
 
-        lastCounteredBy: null,
+        lastCounteredBy:
+          null,
 
-        assignedDriverId: null,
+        assignedDriverId:
+          null,
 
         createdByUserId:
           actor.id,
 
-        readyToCollectAt: null,
+        readyToCollectAt:
+          null,
+
         readyToCollectSource:
           null,
+
         readyToCollectByUserId:
           null,
 
@@ -708,42 +766,65 @@ export const createBooking =
         securityVerifiedDriverId:
           null,
 
-        driverCollectedAt: null,
-        securityReleasedAt: null,
+        driverCollectedAt:
+          null,
 
-        securityHoldReason: null,
-        securityHoldAt: null,
+        securityReleasedAt:
+          null,
+
+        securityHoldReason:
+          null,
+
+        securityHoldAt:
+          null,
+
         securityHoldResolvedAt:
           null,
 
-        driverDeliveredAt: null,
+        driverDeliveredAt:
+          null,
 
         deliveryConfirmationToken:
           null,
 
-        deliveryOtpHash: null,
+        deliveryOtpHash:
+          null,
+
         deliveryOtpExpiresAt:
           null,
 
-        deliveryOtpAttempts: 0,
+        deliveryOtpAttempts:
+          0,
 
         deliveryOtpVerifiedAt:
           null,
 
-        cancelledAt: null,
-        cancelledByUserId: null,
-        cancellationReason: null,
+        cancelledAt:
+          null,
+
+        cancelledByUserId:
+          null,
+
+        cancellationReason:
+          null,
       });
 
     await createAuditLog({
-      bookingId: booking.id,
+      bookingId:
+        booking.id,
+
       action:
         "BOOKING_REQUEST_CREATED",
+
       fieldName:
         "requestedCollectionDate",
-      previousValue: null,
+
+      previousValue:
+        null,
+
       newValue:
         requestedCollectionDate,
+
       actor,
     });
 
@@ -757,7 +838,8 @@ export const acceptBookingDate =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -778,7 +860,9 @@ export const acceptBookingDate =
       !handleRoleCheck(
         res,
         actor,
-        ["TRANSPORT_ADMIN"]
+        [
+          "TRANSPORT_ADMIN",
+        ]
       )
     ) {
       return;
@@ -799,11 +883,10 @@ export const acceptBookingDate =
       );
 
     if (!check.allowed) {
-      return res
-        .status(403)
-        .json({
-          error: check.reason,
-        });
+      return res.status(403).json({
+        error:
+          check.reason,
+      });
     }
 
     const updated =
@@ -822,18 +905,27 @@ export const acceptBookingDate =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
+
       action:
         "BOOKING_DATE_ACCEPTED",
-      fieldName: "status",
+
+      fieldName:
+        "status",
+
       previousValue:
         booking.status,
+
       newValue:
         "BOOKING_CONFIRMED",
+
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const counterBookingDate =
@@ -841,7 +933,8 @@ export const counterBookingDate =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -862,7 +955,9 @@ export const counterBookingDate =
       !handleRoleCheck(
         res,
         actor,
-        ["TRANSPORT_ADMIN"]
+        [
+          "TRANSPORT_ADMIN",
+        ]
       )
     ) {
       return;
@@ -873,12 +968,10 @@ export const counterBookingDate =
     } = req.body;
 
     if (!counterProposedDate) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "counterProposedDate is required",
-        });
+      return res.status(400).json({
+        error:
+          "counterProposedDate is required",
+      });
     }
 
     const booking =
@@ -896,11 +989,10 @@ export const counterBookingDate =
       );
 
     if (!check.allowed) {
-      return res
-        .status(403)
-        .json({
-          error: check.reason,
-        });
+      return res.status(403).json({
+        error:
+          check.reason,
+      });
     }
 
     const validation =
@@ -910,12 +1002,10 @@ export const counterBookingDate =
       );
 
     if (!validation.valid) {
-      return res
-        .status(400)
-        .json({
-          error:
-            validation.error,
-        });
+      return res.status(400).json({
+        error:
+          validation.error,
+      });
     }
 
     const updated =
@@ -936,7 +1026,9 @@ export const counterBookingDate =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
+
       action:
         "BOOKING_DATE_COUNTERED",
 
@@ -952,7 +1044,9 @@ export const counterBookingDate =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const acceptCounterDate =
@@ -960,7 +1054,8 @@ export const acceptCounterDate =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -981,7 +1076,9 @@ export const acceptCounterDate =
       !handleRoleCheck(
         res,
         actor,
-        ["CUSTOMER"]
+        [
+          "CUSTOMER",
+        ]
       )
     ) {
       return;
@@ -1001,12 +1098,10 @@ export const acceptCounterDate =
         booking
       )
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Booking belongs to another customer account",
-        });
+      return res.status(403).json({
+        error:
+          "Booking belongs to another customer account",
+      });
     }
 
     const check =
@@ -1016,11 +1111,10 @@ export const acceptCounterDate =
       );
 
     if (!check.allowed) {
-      return res
-        .status(403)
-        .json({
-          error: check.reason,
-        });
+      return res.status(403).json({
+        error:
+          check.reason,
+      });
     }
 
     const updated =
@@ -1036,11 +1130,14 @@ export const acceptCounterDate =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
+
       action:
         "CUSTOMER_ACCEPTED_COUNTER_DATE",
 
-      fieldName: "status",
+      fieldName:
+        "status",
 
       previousValue:
         booking.status,
@@ -1051,7 +1148,9 @@ export const acceptCounterDate =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const requestDateChange =
@@ -1059,7 +1158,8 @@ export const requestDateChange =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1089,16 +1189,15 @@ export const requestDateChange =
       return;
     }
 
-    const { requestedDate } =
-      req.body;
+    const {
+      requestedDate,
+    } = req.body;
 
     if (!requestedDate) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "requestedDate is required",
-        });
+      return res.status(400).json({
+        error:
+          "requestedDate is required",
+      });
     }
 
     const booking =
@@ -1115,12 +1214,10 @@ export const requestDateChange =
         booking
       )
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Booking belongs to another customer account",
-        });
+      return res.status(403).json({
+        error:
+          "Booking belongs to another customer account",
+      });
     }
 
     if (
@@ -1129,24 +1226,20 @@ export const requestDateChange =
       booking.status !==
         "READY_TO_COLLECT"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Date changes can only be requested after confirmation and before collection",
-        });
+      return res.status(400).json({
+        error:
+          "Date changes can only be requested after confirmation and before collection",
+      });
     }
 
     if (
       booking.driverCollectedAt ||
       booking.securityReleasedAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Date cannot be changed once collection has begun",
-        });
+      return res.status(400).json({
+        error:
+          "Date cannot be changed once collection has begun",
+      });
     }
 
     const validation =
@@ -1156,12 +1249,10 @@ export const requestDateChange =
       );
 
     if (!validation.valid) {
-      return res
-        .status(400)
-        .json({
-          error:
-            validation.error,
-        });
+      return res.status(400).json({
+        error:
+          validation.error,
+      });
     }
 
     const updated =
@@ -1180,7 +1271,8 @@ export const requestDateChange =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "DATE_CHANGE_REQUESTED",
@@ -1197,7 +1289,9 @@ export const requestDateChange =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const confirmDateChange =
@@ -1205,7 +1299,8 @@ export const confirmDateChange =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1226,7 +1321,9 @@ export const confirmDateChange =
       !handleRoleCheck(
         res,
         actor,
-        ["TRANSPORT_ADMIN"]
+        [
+          "TRANSPORT_ADMIN",
+        ]
       )
     ) {
       return;
@@ -1243,24 +1340,20 @@ export const confirmDateChange =
     if (
       !booking.pendingDateChange
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "No date change is waiting for confirmation",
-        });
+      return res.status(400).json({
+        error:
+          "No date change is waiting for confirmation",
+      });
     }
 
     if (
       booking.driverCollectedAt ||
       booking.securityReleasedAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Date cannot be changed once collection has begun",
-        });
+      return res.status(400).json({
+        error:
+          "Date cannot be changed once collection has begun",
+      });
     }
 
     const newDate =
@@ -1277,12 +1370,10 @@ export const confirmDateChange =
       );
 
     if (!validation.valid) {
-      return res
-        .status(400)
-        .json({
-          error:
-            validation.error,
-        });
+      return res.status(400).json({
+        error:
+          validation.error,
+      });
     }
 
     const previousDate =
@@ -1298,7 +1389,9 @@ export const confirmDateChange =
           scheduledCollectionDate:
             newDate,
 
-          pendingDateChange: null,
+          pendingDateChange:
+            null,
+
           dateChangeRequestedAt:
             null,
 
@@ -1314,7 +1407,8 @@ export const confirmDateChange =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "DATE_CHANGE_CONFIRMED",
@@ -1325,12 +1419,15 @@ export const confirmDateChange =
       previousValue:
         previousDate,
 
-      newValue: newDate,
+      newValue:
+        newDate,
 
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const assignDriver =
@@ -1338,7 +1435,8 @@ export const assignDriver =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1359,29 +1457,29 @@ export const assignDriver =
       !handleRoleCheck(
         res,
         actor,
-        ["TRANSPORT_ADMIN"]
+        [
+          "TRANSPORT_ADMIN",
+        ]
       )
     ) {
       return;
     }
 
-    const {
-      assignedDriverId,
-    } = req.body;
-
     const driverId =
-      Number(assignedDriverId);
+      Number(
+        req.body.assignedDriverId
+      );
 
     if (
-      !assignedDriverId ||
-      Number.isNaN(driverId)
+      !req.body.assignedDriverId ||
+      Number.isNaN(
+        driverId
+      )
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "assignedDriverId must be a number",
-        });
+      return res.status(400).json({
+        error:
+          "assignedDriverId must be a number",
+      });
     }
 
     const driver =
@@ -1392,14 +1490,13 @@ export const assignDriver =
     if (
       !driver ||
       !driver.isActive ||
-      driver.role !== "DRIVER"
+      driver.role !==
+        "DRIVER"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "assignedDriverId must belong to an active DRIVER user",
-        });
+      return res.status(400).json({
+        error:
+          "assignedDriverId must belong to an active DRIVER user",
+      });
     }
 
     const booking =
@@ -1419,24 +1516,20 @@ export const assignDriver =
         booking.status
       )
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Driver can only be assigned before the vehicle leaves site",
-        });
+      return res.status(400).json({
+        error:
+          "Driver can only be assigned before the vehicle leaves site",
+      });
     }
 
     if (
       booking.driverCollectedAt ||
       booking.securityReleasedAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Driver cannot be reassigned once collection has started",
-        });
+      return res.status(400).json({
+        error:
+          "Driver cannot be reassigned once collection has started",
+      });
     }
 
     const oldDriver =
@@ -1449,7 +1542,6 @@ export const assignDriver =
           assignedDriverId:
             driverId,
 
-          // A previously verified driver is no longer valid.
           securityDriverVerifiedAt:
             null,
 
@@ -1459,7 +1551,8 @@ export const assignDriver =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         oldDriver
@@ -1478,7 +1571,9 @@ export const assignDriver =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const markReady =
@@ -1486,7 +1581,8 @@ export const markReady =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1507,7 +1603,9 @@ export const markReady =
       !handleRoleCheck(
         res,
         actor,
-        ["OPS_ADMIN"]
+        [
+          "OPS_ADMIN",
+        ]
       )
     ) {
       return;
@@ -1528,14 +1626,11 @@ export const markReady =
       );
 
     if (!check.allowed) {
-      return res
-        .status(403)
-        .json({
-          error: check.reason,
-        });
+      return res.status(403).json({
+        error:
+          check.reason,
+      });
     }
-
-    const now = new Date();
 
     const updated =
       await bookingsStore.updateById(
@@ -1545,7 +1640,7 @@ export const markReady =
             "READY_TO_COLLECT",
 
           readyToCollectAt:
-            now as any,
+            new Date() as any,
 
           readyToCollectSource:
             "OPS_MANUAL",
@@ -1556,12 +1651,14 @@ export const markReady =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "MARKED_READY_TO_COLLECT",
 
-      fieldName: "status",
+      fieldName:
+        "status",
 
       previousValue:
         booking.status,
@@ -1572,136 +1669,9 @@ export const markReady =
       actor,
     });
 
-    return res.json(updated);
-  };
-
-export const verifyDriverAtSecurity =
-  async (
-    req: Request,
-    res: Response
-  ) => {
-    const id = parseBookingId(req);
-
-    if (id === null) {
-      return res.status(400).json({
-        error:
-          "Invalid booking id",
-      });
-    }
-
-    const actor =
-      await getRequestUser(
-        req,
-        res
-      );
-
-    if (!actor) return;
-
-    if (
-      !handleRoleCheck(
-        res,
-        actor,
-        ["SECURITY"]
-      )
-    ) {
-      return;
-    }
-
-    const {
-      driverId,
-    } = req.body;
-
-    const parsedDriverId =
-      Number(driverId);
-
-    if (
-      !driverId ||
-      Number.isNaN(
-        parsedDriverId
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "driverId is required",
-        });
-    }
-
-    const booking =
-      await getBookingOr404(
-        id,
-        res
-      );
-
-    if (!booking) return;
-
-    if (
-      booking.status !==
-      "READY_TO_COLLECT"
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Security can only verify a driver when the vehicle is READY_TO_COLLECT",
-        });
-    }
-
-    if (
-      !booking.assignedDriverId
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "No driver has been assigned",
-        });
-    }
-
-    if (
-      parsedDriverId !==
-      booking.assignedDriverId
-    ) {
-      return res
-        .status(409)
-        .json({
-          error:
-            "Driver does not match the assigned driver",
-        });
-    }
-
-    const updated =
-      await bookingsStore.updateById(
-        id,
-        {
-          securityDriverVerifiedAt:
-            new Date() as any,
-
-          securityVerifiedDriverId:
-            parsedDriverId,
-        }
-      );
-
-    await createAuditLog({
-      bookingId: id,
-
-      action:
-        "SECURITY_DRIVER_VERIFIED",
-
-      fieldName:
-        "securityVerifiedDriverId",
-
-      previousValue:
-        booking.securityVerifiedDriverId,
-
-      newValue:
-        parsedDriverId,
-
-      actor,
-    });
-
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const confirmDriverCollection =
@@ -1709,7 +1679,8 @@ export const confirmDriverCollection =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1730,7 +1701,9 @@ export const confirmDriverCollection =
       !handleRoleCheck(
         res,
         actor,
-        ["DRIVER"]
+        [
+          "DRIVER",
+        ]
       )
     ) {
       return;
@@ -1748,61 +1721,68 @@ export const confirmDriverCollection =
       booking.status !==
       "READY_TO_COLLECT"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Vehicle must be READY_TO_COLLECT",
-        });
+      return res.status(400).json({
+        error:
+          "Vehicle must be READY_TO_COLLECT",
+      });
     }
 
     if (
       booking.assignedDriverId !==
       actor.id
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Only the assigned driver can confirm collection",
-        });
-    }
-
-    if (
-      booking.securityVerifiedDriverId !==
-        actor.id ||
-      !booking.securityDriverVerifiedAt
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Security must verify the assigned driver first",
-        });
+      return res.status(403).json({
+        error:
+          "Only the assigned driver can confirm collection",
+      });
     }
 
     if (
       booking.driverCollectedAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Collection has already been confirmed",
-        });
+      return res.status(400).json({
+        error:
+          "Collection has already been confirmed",
+      });
     }
+
+    const pocCount =
+      await bookingEvidenceStore.countByType(
+        id,
+        "POC",
+        actor.id
+      );
+
+    if (
+      pocCount <
+      MIN_EVIDENCE_IMAGES
+    ) {
+      return res.status(400).json({
+        error:
+          `At least ${MIN_EVIDENCE_IMAGES} POC images are required before confirming collection`,
+
+        pocCount,
+
+        minimumRequired:
+          MIN_EVIDENCE_IMAGES,
+      });
+    }
+
+    const collectedAt =
+      new Date();
 
     const updated =
       await bookingsStore.updateById(
         id,
         {
           driverCollectedAt:
-            new Date() as any,
+            collectedAt as any,
         }
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "DRIVER_COLLECTION_CONFIRMED",
@@ -1810,15 +1790,18 @@ export const confirmDriverCollection =
       fieldName:
         "driverCollectedAt",
 
-      previousValue: null,
+      previousValue:
+        null,
 
       newValue:
-        new Date(),
+        collectedAt,
 
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const placeSecurityHold =
@@ -1826,7 +1809,8 @@ export const placeSecurityHold =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1847,24 +1831,25 @@ export const placeSecurityHold =
       !handleRoleCheck(
         res,
         actor,
-        ["SECURITY"]
+        [
+          "SECURITY",
+        ]
       )
     ) {
       return;
     }
 
-    const { reason } = req.body;
+    const reason =
+      String(
+        req.body.reason ??
+        ""
+      ).trim();
 
-    if (
-      !reason ||
-      !String(reason).trim()
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "reason is required",
-        });
+    if (!reason) {
+      return res.status(400).json({
+        error:
+          "reason is required",
+      });
     }
 
     const booking =
@@ -1879,12 +1864,10 @@ export const placeSecurityHold =
       booking.status !==
       "READY_TO_COLLECT"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Security hold can only be placed before release",
-        });
+      return res.status(400).json({
+        error:
+          "Security hold can only be placed before release",
+      });
     }
 
     const updated =
@@ -1895,7 +1878,7 @@ export const placeSecurityHold =
             "SECURITY_HOLD",
 
           securityHoldReason:
-            String(reason).trim(),
+            reason,
 
           securityHoldAt:
             new Date() as any,
@@ -1906,7 +1889,8 @@ export const placeSecurityHold =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "SECURITY_HOLD_PLACED",
@@ -1914,15 +1898,18 @@ export const placeSecurityHold =
       fieldName:
         "securityHoldReason",
 
-      previousValue: null,
+      previousValue:
+        null,
 
       newValue:
-        String(reason).trim(),
+        reason,
 
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const resolveSecurityHold =
@@ -1930,7 +1917,8 @@ export const resolveSecurityHold =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -1972,12 +1960,10 @@ export const resolveSecurityHold =
       booking.status !==
       "SECURITY_HOLD"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Booking is not on security hold",
-        });
+      return res.status(400).json({
+        error:
+          "Booking is not on security hold",
+      });
     }
 
     const updated =
@@ -1990,7 +1976,6 @@ export const resolveSecurityHold =
           securityHoldResolvedAt:
             new Date() as any,
 
-          // Security must verify again.
           securityDriverVerifiedAt:
             null,
 
@@ -2000,12 +1985,14 @@ export const resolveSecurityHold =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "SECURITY_HOLD_RESOLVED",
 
-      fieldName: "status",
+      fieldName:
+        "status",
 
       previousValue:
         "SECURITY_HOLD",
@@ -2016,7 +2003,9 @@ export const resolveSecurityHold =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const releaseFromSite =
@@ -2024,7 +2013,8 @@ export const releaseFromSite =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -2045,10 +2035,29 @@ export const releaseFromSite =
       !handleRoleCheck(
         res,
         actor,
-        ["SECURITY"]
+        [
+          "SECURITY",
+        ]
       )
     ) {
       return;
+    }
+
+    const driverId =
+      Number(
+        req.body.driverId
+      );
+
+    if (
+      !req.body.driverId ||
+      Number.isNaN(
+        driverId
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          "driverId is required",
+      });
     }
 
     const booking =
@@ -2063,48 +2072,64 @@ export const releaseFromSite =
       booking.status !==
       "READY_TO_COLLECT"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Vehicle must be READY_TO_COLLECT",
-        });
+      return res.status(400).json({
+        error:
+          "Vehicle must be READY_TO_COLLECT",
+      });
     }
 
     if (
       !booking.assignedDriverId
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "A driver must be assigned first",
-        });
+      return res.status(400).json({
+        error:
+          "A driver must be assigned first",
+      });
     }
 
     if (
-      booking.securityVerifiedDriverId !==
-        booking.assignedDriverId ||
-      !booking.securityDriverVerifiedAt
+      driverId !==
+      booking.assignedDriverId
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Assigned driver has not been verified by security",
-        });
+      return res.status(409).json({
+        error:
+          "Driver does not match the assigned driver",
+      });
     }
 
     if (
       !booking.driverCollectedAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Driver must confirm collection first",
-        });
+      return res.status(400).json({
+        error:
+          "Driver must confirm collection before arriving at Security",
+      });
     }
+
+    const pocCount =
+      await bookingEvidenceStore.countByType(
+        id,
+        "POC",
+        booking.assignedDriverId
+      );
+
+    if (
+      pocCount <
+      MIN_EVIDENCE_IMAGES
+    ) {
+      return res.status(400).json({
+        error:
+          `At least ${MIN_EVIDENCE_IMAGES} POC images are required before release`,
+
+        pocCount,
+
+        minimumRequired:
+          MIN_EVIDENCE_IMAGES,
+      });
+    }
+
+    const now =
+      new Date();
 
     const updated =
       await bookingsStore.updateById(
@@ -2113,18 +2138,26 @@ export const releaseFromSite =
           status:
             "IN_TRANSIT",
 
+          securityDriverVerifiedAt:
+            now as any,
+
+          securityVerifiedDriverId:
+            driverId,
+
           securityReleasedAt:
-            new Date() as any,
+            now as any,
         }
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
-        "SECURITY_RELEASED_VEHICLE",
+        "SECURITY_VERIFIED_AND_RELEASED",
 
-      fieldName: "status",
+      fieldName:
+        "status",
 
       previousValue:
         booking.status,
@@ -2135,7 +2168,9 @@ export const releaseFromSite =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };
 
 export const confirmDriverDelivered =
@@ -2143,7 +2178,8 @@ export const confirmDriverDelivered =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -2164,7 +2200,9 @@ export const confirmDriverDelivered =
       !handleRoleCheck(
         res,
         actor,
-        ["DRIVER"]
+        [
+          "DRIVER",
+        ]
       )
     ) {
       return;
@@ -2182,36 +2220,58 @@ export const confirmDriverDelivered =
       booking.status !==
       "IN_TRANSIT"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Vehicle must be IN_TRANSIT before delivery can be confirmed",
-        });
+      return res.status(400).json({
+        error:
+          "Vehicle must be IN_TRANSIT before delivery can be confirmed",
+      });
     }
 
     if (
       booking.assignedDriverId !==
       actor.id
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Only the assigned driver can confirm delivery",
-        });
+      return res.status(403).json({
+        error:
+          "Only the assigned driver can confirm delivery",
+      });
     }
 
-    const otp = String(
-      randomInt(
-        100000,
-        1000000
-      )
-    );
+    const podCount =
+      await bookingEvidenceStore.countByType(
+        id,
+        "POD",
+        actor.id
+      );
+
+    if (
+      podCount <
+      MIN_EVIDENCE_IMAGES
+    ) {
+      return res.status(400).json({
+        error:
+          `At least ${MIN_EVIDENCE_IMAGES} POD images are required before confirming delivery`,
+
+        podCount,
+
+        minimumRequired:
+          MIN_EVIDENCE_IMAGES,
+      });
+    }
+
+    const otp =
+      String(
+        randomInt(
+          100000,
+          1000000
+        )
+      );
 
     const token =
-      randomBytes(32)
-        .toString("hex");
+      randomBytes(
+        32
+      ).toString(
+        "hex"
+      );
 
     const otpHash =
       await bcrypt.hash(
@@ -2222,8 +2282,13 @@ export const confirmDriverDelivered =
     const expiresAt =
       new Date(
         Date.now() +
-          15 * 60 * 1000
+          15 *
+          60 *
+          1000
       );
+
+    const deliveredAt =
+      new Date();
 
     const updated =
       await bookingsStore.updateById(
@@ -2233,7 +2298,7 @@ export const confirmDriverDelivered =
             "DELIVERED_PENDING_CONFIRMATION",
 
           driverDeliveredAt:
-            new Date() as any,
+            deliveredAt as any,
 
           deliveryConfirmationToken:
             token,
@@ -2244,7 +2309,8 @@ export const confirmDriverDelivered =
           deliveryOtpExpiresAt:
             expiresAt as any,
 
-          deliveryOtpAttempts: 0,
+          deliveryOtpAttempts:
+            0,
 
           deliveryOtpVerifiedAt:
             null,
@@ -2252,12 +2318,14 @@ export const confirmDriverDelivered =
       );
 
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "DRIVER_DELIVERY_CONFIRMED",
 
-      fieldName: "status",
+      fieldName:
+        "status",
 
       previousValue:
         booking.status,
@@ -2268,29 +2336,23 @@ export const confirmDriverDelivered =
       actor,
     });
 
-    /*
-      Later:
-      send OTP + confirmation URL to:
-      booking.recipientEmail
-      booking.recipientPhone
-    */
-
     const isProduction =
-      (globalThis as any)
-        .process?.env?.NODE_ENV ===
+      process.env.NODE_ENV ===
       "production";
 
     if (isProduction) {
       return res.json({
-        booking: updated,
+        booking:
+          updated,
+
         message:
           "Delivery confirmation created. OTP provider still needs to be configured.",
       });
     }
 
-    // Development only, so you can test before email/SMS is wired in.
     return res.json({
-      booking: updated,
+      booking:
+        updated,
 
       developmentConfirmation: {
         token,
@@ -2305,84 +2367,78 @@ export const verifyDeliveryOtp =
     req: Request,
     res: Response
   ) => {
-    const token = String(
-      req.params.token
-  );
+    const token =
+      String(
+        req.params.token ??
+        ""
+      );
 
-    const { otp } =
-      req.body;
+    const {
+      otp,
+    } = req.body;
 
-    if (!token || !otp) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "token and otp are required",
-        });
+    if (
+      !token ||
+      !otp
+    ) {
+      return res.status(400).json({
+        error:
+          "token and otp are required",
+      });
     }
 
     const booking =
-      await bookingsStore
-        .getByDeliveryToken(
-          token
-        );
+      await bookingsStore.getByDeliveryToken(
+        token
+      );
 
     if (!booking) {
-      return res
-        .status(404)
-        .json({
-          error:
-            "Delivery confirmation not found",
-        });
+      return res.status(404).json({
+        error:
+          "Delivery confirmation not found",
+      });
     }
 
     if (
       booking.status !==
       "DELIVERED_PENDING_CONFIRMATION"
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Delivery is not awaiting recipient confirmation",
-        });
+      return res.status(400).json({
+        error:
+          "Delivery is not awaiting recipient confirmation",
+      });
     }
 
     if (
       !booking.deliveryOtpHash ||
       !booking.deliveryOtpExpiresAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "No active OTP exists",
-        });
+      return res.status(400).json({
+        error:
+          "No active OTP exists",
+      });
     }
 
     if (
       booking.deliveryOtpAttempts >=
       5
     ) {
-      return res
-        .status(429)
-        .json({
-          error:
-            "Maximum OTP attempts reached",
-        });
+      return res.status(429).json({
+        error:
+          "Maximum OTP attempts reached",
+      });
     }
 
     if (
       new Date(
         booking.deliveryOtpExpiresAt
-      ) < new Date()
+      ) <
+      new Date()
     ) {
-      return res
-        .status(410)
-        .json({
-          error:
-            "OTP has expired",
-        });
+      return res.status(410).json({
+        error:
+          "OTP has expired",
+      });
     }
 
     const matches =
@@ -2401,12 +2457,10 @@ export const verifyDeliveryOtp =
         }
       );
 
-      return res
-        .status(400)
-        .json({
-          error:
-            "Incorrect OTP",
-        });
+      return res.status(400).json({
+        error:
+          "Incorrect OTP",
+      });
     }
 
     const verifiedAt =
@@ -2416,12 +2470,14 @@ export const verifyDeliveryOtp =
       await bookingsStore.updateById(
         booking.id,
         {
-          status: "COMPLETED",
+          status:
+            "COMPLETED",
 
           deliveryOtpVerifiedAt:
             verifiedAt as any,
 
-          deliveryOtpHash: null,
+          deliveryOtpHash:
+            null,
 
           deliveryConfirmationToken:
             null,
@@ -2429,7 +2485,8 @@ export const verifyDeliveryOtp =
       );
 
     await auditLogsStore.create({
-      entityType: "BOOKING",
+      entityType:
+        "BOOKING",
 
       entityId:
         booking.id,
@@ -2446,8 +2503,11 @@ export const verifyDeliveryOtp =
       newValue:
         "COMPLETED",
 
-      changedByUserId: null,
-      changedByRole: null,
+      changedByUserId:
+        null,
+
+      changedByRole:
+        null,
 
       changedByName:
         "Recipient OTP",
@@ -2470,7 +2530,8 @@ export const cancelBooking =
     req: Request,
     res: Response
   ) => {
-    const id = parseBookingId(req);
+    const id =
+      parseBookingId(req);
 
     if (id === null) {
       return res.status(400).json({
@@ -2500,20 +2561,17 @@ export const cancelBooking =
       return;
     }
 
-    const {
-      reason,
-    } = req.body;
+    const reason =
+      String(
+        req.body.reason ??
+        ""
+      ).trim();
 
-    if (
-      !reason ||
-      !String(reason).trim()
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Cancellation reason is required",
-        });
+    if (!reason) {
+      return res.status(400).json({
+        error:
+          "Cancellation reason is required",
+      });
     }
 
     const booking =
@@ -2530,12 +2588,10 @@ export const cancelBooking =
         booking
       )
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Booking belongs to another customer account",
-        });
+      return res.status(403).json({
+        error:
+          "Booking belongs to another customer account",
+      });
     }
 
     if (
@@ -2549,23 +2605,19 @@ export const cancelBooking =
         booking.status
       )
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Booking can no longer be cancelled",
-        });
+      return res.status(400).json({
+        error:
+          "Booking can no longer be cancelled",
+      });
     }
 
     if (
       booking.driverCollectedAt
     ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Booking cannot be cancelled after the driver has collected the vehicle",
-        });
+      return res.status(400).json({
+        error:
+          "Booking cannot be cancelled after the driver has collected the vehicle",
+      });
     }
 
     const updated =
@@ -2582,20 +2634,13 @@ export const cancelBooking =
             actor.id,
 
           cancellationReason:
-            String(reason).trim(),
+            reason,
         }
       );
 
-    /*
-      No vehicle status change.
-
-      Booking creation no longer changes stock state,
-      so cancellation naturally leaves the vehicle
-      in the same imported stock state it had before.
-    */
-
     await createAuditLog({
-      bookingId: id,
+      bookingId:
+        id,
 
       action:
         "BOOKING_CANCELLED",
@@ -2612,5 +2657,7 @@ export const cancelBooking =
       actor,
     });
 
-    return res.json(updated);
+    return res.json(
+      updated
+    );
   };

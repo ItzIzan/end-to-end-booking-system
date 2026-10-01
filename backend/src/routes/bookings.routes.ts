@@ -19,21 +19,39 @@ import {
   requestDateChange,
   resolveSecurityHold,
   verifyDeliveryOtp,
-  verifyDriverAtSecurity,
 } from "../controllers/bookings.controller";
+
+import {
+  deleteBookingEvidence,
+  getBookingEvidence,
+  preflightPocEvidence,
+  preflightPodEvidence,
+  uploadPocEvidence,
+  uploadPodEvidence,
+} from "../controllers/bookingEvidence.controller";
+
+import {
+  evidenceUpload,
+} from "../middleware/uploads";
+
+import {
+  MAX_EVIDENCE_IMAGES_PER_UPLOAD,
+} from "../constants/bookingEvidence";
 
 const router = Router();
 
 /*
  * Public recipient confirmation.
- * No account required.
  */
 router.post(
   "/delivery-confirm/:token",
   verifyDeliveryOtp
 );
 
-router.get("/", getBookings);
+router.get(
+  "/",
+  getBookings
+);
 
 router.get(
   "/:id",
@@ -98,13 +116,41 @@ router.post(
 );
 
 /*
- * Collection day.
+ * Evidence.
  */
-router.post(
-  "/:id/security-verify-driver",
-  verifyDriverAtSecurity
+router.get(
+  "/:id/evidence",
+  getBookingEvidence
 );
 
+router.post(
+  "/:id/evidence/poc",
+  preflightPocEvidence,
+  evidenceUpload.array(
+    "images",
+    MAX_EVIDENCE_IMAGES_PER_UPLOAD
+  ),
+  uploadPocEvidence
+);
+
+router.post(
+  "/:id/evidence/pod",
+  preflightPodEvidence,
+  evidenceUpload.array(
+    "images",
+    MAX_EVIDENCE_IMAGES_PER_UPLOAD
+  ),
+  uploadPodEvidence
+);
+
+router.delete(
+  "/:id/evidence/:evidenceId",
+  deleteBookingEvidence
+);
+
+/*
+ * Collection day.
+ */
 router.post(
   "/:id/driver-collected",
   confirmDriverCollection
@@ -120,6 +166,10 @@ router.post(
   resolveSecurityHold
 );
 
+/*
+ * Security verifies the assigned
+ * driver and releases in one action.
+ */
 router.post(
   "/:id/security-release",
   releaseFromSite

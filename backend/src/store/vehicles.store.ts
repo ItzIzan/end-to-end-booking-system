@@ -5,6 +5,10 @@ import type {
   Vehicle,
   VehicleFilters,
 } from "../types/vehicle";
+import {
+  normaliseReg,
+  normaliseVin,
+} from "../utils/vehicleIdentifiers";
 
 export const vehiclesStore = {
   async getAll(filters?: VehicleFilters): Promise<Vehicle[]> {
@@ -85,12 +89,75 @@ export const vehiclesStore = {
     });
   },
 
-  async create(
-    data: CreateVehicleInput
-  ): Promise<Vehicle> {
+  async getByExactVin(vin: string): Promise<Vehicle | null> {
+    return prisma.vehicle.findFirst({
+      where: {
+        vin: {
+          equals: normaliseVin(vin),
+          mode: "insensitive",
+        },
+      },
+      include: {
+        site: true,
+        customerAccount: true,
+      },
+    });
+  },
+
+  async getByIdentifier(identifier: string): Promise<Vehicle | null> {
+    const vin = normaliseVin(identifier);
+    const reg = normaliseReg(identifier);
+
+    const matches = await prisma.vehicle.findMany({
+      where: {
+        OR: [
+          {
+            vin: {
+              equals: vin,
+              mode: "insensitive",
+            },
+          },
+          {
+            reg: {
+              equals: reg,
+              mode: "insensitive",
+            },
+          },
+        ],
+      },
+      include: {
+        site: true,
+        customerAccount: true,
+        bookings: {
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+      },
+      orderBy: [
+        { updatedAt: "desc" },
+        { id: "desc" },
+      ],
+    });
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    return (
+      matches.find(
+        (vehicle: Vehicle) =>
+          vehicle.vehicleStatus !== "REMOVED"
+      ) ?? matches[0]
+    );
+  },
+
+  async create(data: CreateVehicleInput): Promise<Vehicle> {
     return prisma.vehicle.create({
       data: {
         ...data,
+        vin: normaliseVin(data.vin),
+        reg: normaliseReg(data.reg),
         registrationDate: new Date(data.registrationDate),
         motExpiryDate: new Date(data.motExpiryDate),
       },
@@ -111,11 +178,17 @@ export const vehiclesStore = {
       where: { id },
       data: {
         ...updates,
-
+        vin:
+          updates.vin !== undefined
+            ? normaliseVin(updates.vin)
+            : undefined,
+        reg:
+          updates.reg !== undefined
+            ? normaliseReg(updates.reg)
+            : undefined,
         registrationDate: updates.registrationDate
           ? new Date(updates.registrationDate)
           : undefined,
-
         motExpiryDate: updates.motExpiryDate
           ? new Date(updates.motExpiryDate)
           : undefined,
