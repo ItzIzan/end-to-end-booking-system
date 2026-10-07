@@ -1,17 +1,17 @@
 import { Request, Response } from "express";
 import { auditLogsStore } from "../store/auditLogs.store";
 import { sitesStore } from "../store/sites.store";
-import { getRoleFromHeader } from "../utils/bookingPermissions";
 
-function getActor(req: Request) {
-  const userIdHeader = req.header("x-user-id");
-  const userId = userIdHeader ? Number(userIdHeader) : null;
+import {
+  getAuditActor,
+} from "../utils/requestAuth";
 
-  return {
-    changedByUserId: userId && !Number.isNaN(userId) ? userId : null,
-    changedByRole: getRoleFromHeader(req.header("x-user-role")),
-    changedByName: req.header("x-user-name") || null,
-  };
+function getActor(
+  req: Request
+) {
+  return getAuditActor(
+    req
+  );
 }
 
 export const getSites = async (_req: Request, res: Response) => {

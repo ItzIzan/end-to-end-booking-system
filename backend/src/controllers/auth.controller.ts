@@ -1,293 +1,641 @@
-import { Request, Response } from "express";
+import type {
+  Request,
+  Response,
+} from "express";
+
 import bcrypt from "bcryptjs";
 
-import { auditLogsStore } from "../store/auditLogs.store";
-import { customerAccountsStore } from "../store/customerAccounts.store";
-import { usersStore } from "../store/users.store";
+import {
+  auditLogsStore,
+} from "../store/auditLogs.store";
 
-import type { UserRole } from "../types/user";
+import {
+  authSessionsStore,
+} from "../store/authSessions.store";
 
-import { isUserRole } from "../utils/bookingPermissions";
+import {
+  customerAccountsStore,
+} from "../store/customerAccounts.store";
 
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+import {
+  usersStore,
+} from "../store/users.store";
+
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  REFRESH_COOKIE_NAME,
+  generateRefreshToken,
+  getRefreshCookieClearOptions,
+  getRefreshCookieOptions,
+  getRefreshExpiry,
+  hashRefreshToken,
+  signAccessToken,
+} from "../services/auth.service";
+
+import type {
+  User,
+  UserRole,
+  UserWithPassword,
+} from "../types/user";
+
+import {
+  isUserRole,
+} from "../utils/bookingPermissions";
+
+function isValidEmail(
+  email: string
+): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email
+  );
 }
 
-function isValidUsername(username: string): boolean {
-  return /^[a-zA-Z0-9_]{3,30}$/.test(username);
+function isValidUsername(
+  username: string
+): boolean {
+  return /^[a-zA-Z0-9_]{3,30}$/.test(
+    username
+  );
 }
 
-function publicUser(user: {
-  id: number;
-  name: string;
-  username: string;
-  email: string;
-  role: UserRole;
-  isActive: boolean;
-  customerAccountId: number | null;
-  createdAt: string;
-  updatedAt: string;
-}) {
+function publicUser(
+  user: UserWithPassword
+): User {
   return {
     id: user.id,
     name: user.name,
-    username: user.username,
+    username:
+      user.username,
     email: user.email,
     role: user.role,
-    isActive: user.isActive,
-    customerAccountId: user.customerAccountId,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
+    isActive:
+      user.isActive,
+    customerAccountId:
+      user.customerAccountId,
+    createdAt:
+      user.createdAt,
+    updatedAt:
+      user.updatedAt,
   };
 }
 
-export const register = async (
-  req: Request,
+function clearRefreshCookie(
   res: Response
-) => {
-  const {
-    name,
-    username,
-    email,
-    password,
-    role,
-    customerAccountId,
-  } = req.body as {
-    name?: string;
-    username?: string;
-    email?: string;
-    password?: string;
-    role?: UserRole;
-    customerAccountId?: number;
-  };
+) {
+  res.clearCookie(
+    REFRESH_COOKIE_NAME,
+    getRefreshCookieClearOptions()
+  );
+}
 
-  if (
-    !name ||
-    !username ||
-    !email ||
-    !password ||
-    !role
-  ) {
-    return res.status(400).json({
-      error:
-        "name, username, email, password and role are required",
-    });
-  }
+export const register =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const actor =
+      req.authUser;
 
-  if (!isValidUsername(username)) {
-    return res.status(400).json({
-      error:
-        "username must be 3-30 characters and only contain letters, numbers and underscores",
-    });
-  }
-
-  if (!isValidEmail(email)) {
-    return res.status(400).json({
-      error: "email must be valid",
-    });
-  }
-
-  if (password.length < 8) {
-    return res.status(400).json({
-      error:
-        "password must be at least 8 characters",
-    });
-  }
-
-  if (!isUserRole(role)) {
-    return res.status(400).json({
-      error:
-        "Invalid role. Allowed roles: SYSTEM_ADMIN, CUSTOMER, TRANSPORT_ADMIN, OPS_ADMIN, SECURITY, DRIVER",
-    });
-  }
-
-  let parsedCustomerAccountId: number | null =
-    null;
-
-  /*
-   * CUSTOMER users must belong to a customer account.
-   * Internal users do not.
-   */
-  if (role === "CUSTOMER") {
-    parsedCustomerAccountId =
-      Number(customerAccountId);
-
-    if (
-      !customerAccountId ||
-      Number.isNaN(parsedCustomerAccountId)
-    ) {
-      return res.status(400).json({
-        error:
-          "customerAccountId is required for CUSTOMER users",
-      });
+    if (!actor) {
+      return res
+        .status(401)
+        .json({
+          error:
+            "Authentication required",
+        });
     }
 
-    const customerAccount =
-      await customerAccountsStore.getById(
-        parsedCustomerAccountId
+    const {
+      name,
+      username,
+      email,
+      password,
+      role,
+      customerAccountId,
+    } = req.body as {
+      name?: string;
+      username?: string;
+      email?: string;
+      password?: string;
+      role?: UserRole;
+      customerAccountId?:
+        number;
+    };
+
+    if (
+      !name ||
+      !username ||
+      !email ||
+      !password ||
+      !role
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "name, username, email, password and role are required",
+        });
+    }
+
+    const cleanName =
+      name.trim();
+
+    const cleanUsername =
+      username.trim();
+
+    const cleanEmail =
+      email
+        .trim()
+        .toLowerCase();
+
+    if (!cleanName) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "name is required",
+        });
+    }
+
+    if (
+      !isValidUsername(
+        cleanUsername
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "username must be 3-30 characters and only contain letters, numbers and underscores",
+        });
+    }
+
+    if (
+      !isValidEmail(
+        cleanEmail
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "email must be valid",
+        });
+    }
+
+    if (
+      password.length < 10
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "password must be at least 10 characters",
+        });
+    }
+
+    if (
+      !isUserRole(role)
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Invalid role",
+        });
+    }
+
+    let parsedCustomerAccountId:
+      number | null =
+      null;
+
+    if (
+      role ===
+      "CUSTOMER"
+    ) {
+      parsedCustomerAccountId =
+        Number(
+          customerAccountId
+        );
+
+      if (
+        !Number.isInteger(
+          parsedCustomerAccountId
+        ) ||
+        parsedCustomerAccountId <
+          1
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "customerAccountId is required for CUSTOMER users",
+          });
+      }
+
+      const account =
+        await customerAccountsStore
+          .getById(
+            parsedCustomerAccountId
+          );
+
+      if (
+        !account ||
+        !account.isActive
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Customer account does not exist or is inactive",
+          });
+      }
+    }
+
+    const passwordHash =
+      await bcrypt.hash(
+        password,
+        12
       );
 
-    if (
-      !customerAccount ||
-      !customerAccount.isActive
+    try {
+      const user =
+        await usersStore
+          .create({
+            name:
+              cleanName,
+
+            username:
+              cleanUsername,
+
+            email:
+              cleanEmail,
+
+            passwordHash,
+
+            role,
+
+            customerAccountId:
+              role ===
+              "CUSTOMER"
+                ? parsedCustomerAccountId
+                : null,
+          });
+
+      await auditLogsStore
+        .create({
+          entityType:
+            "USER",
+
+          entityId:
+            user.id,
+
+          action:
+            "USER_CREATED",
+
+          fieldName:
+            "role",
+
+          previousValue:
+            null,
+
+          newValue:
+            user.role,
+
+          changedByUserId:
+            actor.id,
+
+          changedByRole:
+            actor.role,
+
+          changedByName:
+            actor.name,
+        });
+
+      return res
+        .status(201)
+        .json({
+          user,
+        });
+    } catch (
+      error: any
     ) {
-      return res.status(400).json({
-        error:
-          "Customer account does not exist or is inactive",
-      });
+      if (
+        error?.code ===
+        "P2002"
+      ) {
+        return res
+          .status(409)
+          .json({
+            error:
+              "email or username already exists",
+          });
+      }
+
+      console.error(
+        "Failed to create user:",
+        error
+      );
+
+      return res
+        .status(500)
+        .json({
+          error:
+            "Failed to create user",
+        });
     }
-  }
-
-  const passwordHash =
-    await bcrypt.hash(password, 10);
-
-  try {
-    const user =
-      await usersStore.create({
-        name,
-        username,
-        email,
-        passwordHash,
-        role,
-
-        customerAccountId:
-          role === "CUSTOMER"
-            ? parsedCustomerAccountId
-            : null,
-      });
-
-    await auditLogsStore.create({
-      entityType: "USER",
-      entityId: user.id,
-
-      action: "USER_REGISTERED",
-
-      fieldName: "role",
-
-      previousValue: null,
-      newValue: user.role,
-
-      changedByUserId: user.id,
-      changedByRole: user.role,
-      changedByName: user.name,
-    });
-
-    return res.status(201).json({
-      user,
-    });
-  } catch (error: any) {
-    if (error?.code === "P2002") {
-      return res.status(409).json({
-        error:
-          "email or username already exists",
-      });
-    }
-
-    console.error(
-      "Failed to register user:",
-      error
-    );
-
-    return res.status(500).json({
-      error:
-        "Failed to register user",
-    });
-  }
-};
-
-export const login = async (
-  req: Request,
-  res: Response
-) => {
-  const {
-    emailOrUsername,
-    password,
-  } = req.body as {
-    emailOrUsername?: string;
-    password?: string;
   };
 
-  if (
-    !emailOrUsername ||
-    !password
-  ) {
-    return res.status(400).json({
-      error:
-        "emailOrUsername and password are required",
-    });
-  }
-
-  const user =
-    await usersStore.findByEmailOrUsername(
-      emailOrUsername
-    );
-
-  if (
-    !user ||
-    !user.isActive
-  ) {
-    return res.status(401).json({
-      error:
-        "Invalid login details",
-    });
-  }
-
-  const passwordMatches =
-    await bcrypt.compare(
+export const login =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const {
+      emailOrUsername,
       password,
-      user.passwordHash
+    } = req.body as {
+      emailOrUsername?:
+        string;
+      password?: string;
+    };
+
+    if (
+      !emailOrUsername ||
+      !password
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "emailOrUsername and password are required",
+        });
+    }
+
+    const user =
+      await usersStore
+        .findByEmailOrUsername(
+          emailOrUsername
+            .trim()
+        );
+
+    if (
+      !user ||
+      !user.isActive
+    ) {
+      return res
+        .status(401)
+        .json({
+          error:
+            "Invalid login details",
+        });
+    }
+
+    const matches =
+      await bcrypt.compare(
+        password,
+        user.passwordHash
+      );
+
+    if (!matches) {
+      return res
+        .status(401)
+        .json({
+          error:
+            "Invalid login details",
+        });
+    }
+
+    const refreshToken =
+      generateRefreshToken();
+
+    const refreshTokenHash =
+      hashRefreshToken(
+        refreshToken
+      );
+
+    const session =
+      await authSessionsStore
+        .create(
+          user.id,
+          refreshTokenHash,
+          getRefreshExpiry()
+        );
+
+    const accessToken =
+      signAccessToken(
+        user.id,
+        session.id
+      );
+
+    res.cookie(
+      REFRESH_COOKIE_NAME,
+      refreshToken,
+      getRefreshCookieOptions()
     );
 
-  if (!passwordMatches) {
-    return res.status(401).json({
-      error:
-        "Invalid login details",
+    return res.json({
+      accessToken,
+
+      expiresIn:
+        ACCESS_TOKEN_TTL_SECONDS,
+
+      user:
+        publicUser(user),
     });
-  }
+  };
 
-  return res.json({
-    user: publicUser(user),
-  });
-};
+export const refresh =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const refreshToken =
+      req.cookies?.[
+        REFRESH_COOKIE_NAME
+      ];
 
-export const getMe = async (
-  req: Request,
-  res: Response
-) => {
-  const userIdHeader =
-    req.header("x-user-id");
+    if (
+      typeof refreshToken !==
+        "string" ||
+      !refreshToken
+    ) {
+      clearRefreshCookie(
+        res
+      );
 
-  if (!userIdHeader) {
-    return res.status(401).json({
-      error:
-        "Missing x-user-id header",
+      return res
+        .status(401)
+        .json({
+          error:
+            "Refresh session required",
+        });
+    }
+
+    const currentHash =
+      hashRefreshToken(
+        refreshToken
+      );
+
+    const currentSession =
+      await authSessionsStore
+        .getByRefreshTokenHash(
+          currentHash
+        );
+
+    if (
+      !currentSession ||
+      currentSession.revokedAt ||
+      currentSession.expiresAt <=
+        new Date() ||
+      !currentSession.user ||
+      !currentSession.user
+        .isActive
+    ) {
+      clearRefreshCookie(
+        res
+      );
+
+      return res
+        .status(401)
+        .json({
+          error:
+            "Refresh session is invalid or expired",
+        });
+    }
+
+    const newRefreshToken =
+      generateRefreshToken();
+
+    const newHash =
+      hashRefreshToken(
+        newRefreshToken
+      );
+
+    const newSession =
+      await authSessionsStore
+        .rotate(
+          currentSession.id,
+          currentSession.userId,
+          newHash,
+          getRefreshExpiry()
+        );
+
+    if (!newSession) {
+      clearRefreshCookie(
+        res
+      );
+
+      return res
+        .status(401)
+        .json({
+          error:
+            "Refresh session is no longer valid",
+        });
+    }
+
+    const accessToken =
+      signAccessToken(
+        currentSession.userId,
+        newSession.id
+      );
+
+    res.cookie(
+      REFRESH_COOKIE_NAME,
+      newRefreshToken,
+      getRefreshCookieOptions()
+    );
+
+    return res.json({
+      accessToken,
+
+      expiresIn:
+        ACCESS_TOKEN_TTL_SECONDS,
+
+      user:
+        currentSession.user,
     });
-  }
+  };
 
-  const userId =
-    Number(userIdHeader);
+export const logout =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const refreshToken =
+      req.cookies?.[
+        REFRESH_COOKIE_NAME
+      ];
 
-  if (Number.isNaN(userId)) {
-    return res.status(400).json({
-      error:
-        "x-user-id must be a number",
+    if (
+      typeof refreshToken ===
+        "string" &&
+      refreshToken
+    ) {
+      await authSessionsStore
+        .revokeByRefreshTokenHash(
+          hashRefreshToken(
+            refreshToken
+          )
+        );
+    }
+
+    clearRefreshCookie(
+      res
+    );
+
+    return res
+      .status(204)
+      .send();
+  };
+
+export const logoutAll =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    const user =
+      req.authUser;
+
+    if (!user) {
+      return res
+        .status(401)
+        .json({
+          error:
+            "Authentication required",
+        });
+    }
+
+    await authSessionsStore
+      .revokeAllForUser(
+        user.id
+      );
+
+    clearRefreshCookie(
+      res
+    );
+
+    return res
+      .status(204)
+      .send();
+  };
+
+export const getMe =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    if (!req.authUser) {
+      return res
+        .status(401)
+        .json({
+          error:
+            "Authentication required",
+        });
+    }
+
+    return res.json({
+      user:
+        req.authUser,
     });
-  }
-
-  const user =
-    await usersStore.getById(userId);
-
-  if (
-    !user ||
-    !user.isActive
-  ) {
-    return res.status(401).json({
-      error:
-        "User not found or inactive",
-    });
-  }
-
-  return res.json({
-    user,
-  });
-};
+  };

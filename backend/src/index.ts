@@ -1,8 +1,14 @@
 import express from "express";
+import cookieParser from "cookie-parser";
+import cors from "cors";
 
 import {
   EVIDENCE_ROOT,
 } from "./config/uploadPaths";
+
+import {
+  requireAuth,
+} from "./middleware/requireAuth";
 
 import authRoutes from "./routes/auth.routes";
 import bookingRoutes from "./routes/bookings.routes";
@@ -17,18 +23,90 @@ import vehicleRoutes from "./routes/vehicles.routes";
 const app =
   express();
 
+app.disable(
+  "x-powered-by"
+);
+
+if (
+  process.env.TRUST_PROXY ===
+  "true"
+) {
+  app.set(
+    "trust proxy",
+    1
+  );
+}
+
+const allowedOrigins =
+  (
+    process.env.CORS_ORIGINS ??
+    "http://localhost:5173"
+  )
+    .split(",")
+    .map(
+      (
+        value
+      ) =>
+        value.trim()
+    )
+    .filter(Boolean);
+
 app.use(
-  express.json()
+  cors({
+    credentials: true,
+
+    origin(
+      origin,
+      callback
+    ) {
+      /*
+       * No Origin header:
+       * Postman, server-to-server,
+       * native apps, curl, etc.
+       */
+      if (!origin) {
+        return callback(
+          null,
+          true
+        );
+      }
+
+      if (
+        allowedOrigins.includes(
+          origin
+        )
+      ) {
+        return callback(
+          null,
+          true
+        );
+      }
+
+      return callback(
+        new Error(
+          "Origin is not allowed by CORS"
+        )
+      );
+    },
+  })
+);
+
+app.use(
+  express.json({
+    limit: "1mb",
+  })
+);
+
+app.use(
+  cookieParser()
 );
 
 /*
- * Development evidence serving.
+ * Temporary local evidence serving.
  *
- * Only the evidence folder is exposed.
- * Temporary Excel uploads are not.
- *
- * Replace with private cloud storage
- * before production.
+ * We will replace this with private
+ * object storage during the storage
+ * production pass.
  */
 app.use(
   "/uploads/evidence",
@@ -37,6 +115,9 @@ app.use(
   )
 );
 
+/*
+ * Public.
+ */
 app.use(
   "/health",
   healthRoutes
@@ -47,31 +128,44 @@ app.use(
   authRoutes
 );
 
+/*
+ * Authenticated API.
+ */
 app.use(
   "/users",
+  requireAuth,
   userRoutes
 );
 
 app.use(
   "/customer-accounts",
+  requireAuth,
   customerAccountRoutes
 );
 
 app.use(
   "/sites",
+  requireAuth,
   siteRoutes
 );
 
 app.use(
   "/vehicles",
+  requireAuth,
   vehicleRoutes
 );
 
 app.use(
   "/stock-import",
+  requireAuth,
   stockImportRoutes
 );
 
+/*
+ * bookingRoutes handles authentication
+ * internally because recipient
+ * confirmation is intentionally public.
+ */
 app.use(
   "/bookings",
   bookingRoutes
@@ -79,19 +173,19 @@ app.use(
 
 app.use(
   "/booking-settings",
+  requireAuth,
   bookingSettingsRoutes
 );
 
-/*
- * Final error handler.
- * Includes upload errors.
- */
 app.use(
   (
     error: unknown,
-    _req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
+    _req:
+      express.Request,
+    res:
+      express.Response,
+    _next:
+      express.NextFunction
   ) => {
     const message =
       error instanceof Error
@@ -106,7 +200,8 @@ app.use(
         ? String(
             (
               error as {
-                name?: unknown;
+                name?:
+                  unknown;
               }
             ).name ??
               ""
@@ -123,9 +218,14 @@ app.use(
         "Only .xlsx"
       );
 
+    const isCorsError =
+      message ===
+      "Origin is not allowed by CORS";
+
     return res
       .status(
-        isUploadError
+        isUploadError ||
+          isCorsError
           ? 400
           : 500
       )
@@ -137,7 +237,10 @@ app.use(
 );
 
 const PORT =
-  3000;
+  Number(
+    process.env.PORT ??
+      3000
+  );
 
 app.listen(
   PORT,

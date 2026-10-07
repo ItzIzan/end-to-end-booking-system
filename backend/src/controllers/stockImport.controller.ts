@@ -16,10 +16,6 @@ import {
 } from "../store/stockImports.store";
 
 import {
-  usersStore,
-} from "../store/users.store";
-
-import {
   deleteTemporaryWorkbook,
   getWorkbookHeaders,
   inspectWorkbook,
@@ -40,32 +36,10 @@ async function getActor(
 ): Promise<
   User | null
 > {
-  const header =
-    req.header(
-      "x-user-id"
-    );
-
-  if (!header) {
-    return null;
-  }
-
-  const id =
-    Number(header);
-
-  if (
-    Number.isNaN(id)
-  ) {
-    return null;
-  }
-
-  const user =
-    await usersStore.getById(
-      id
-    );
-
-  return user?.isActive
-    ? user
-    : null;
+  return (
+    req.authUser ??
+    null
+  );
 }
 
 function validMapping(

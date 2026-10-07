@@ -71,35 +71,16 @@ async function getRequestUser(
   req: Request,
   res: Response
 ): Promise<User | null> {
-  const header =
-    req.header("x-user-id");
-
-  if (!header) {
-    res.status(401).json({
-      error: "Missing x-user-id header",
-    });
-
-    return null;
-  }
-
-  const id = Number(header);
-
-  if (Number.isNaN(id)) {
-    res.status(400).json({
-      error: "x-user-id must be a number",
-    });
-
-    return null;
-  }
-
   const user =
-    await usersStore.getById(id);
+    req.authUser;
 
-  if (!user || !user.isActive) {
-    res.status(401).json({
-      error:
-        "User does not exist or is inactive",
-    });
+  if (!user) {
+    res
+      .status(401)
+      .json({
+        error:
+          "Authentication required",
+      });
 
     return null;
   }

@@ -14,7 +14,10 @@ import type {
   VehicleStatus,
 } from "../types/vehicle";
 
-import { getRoleFromHeader } from "../utils/bookingPermissions";
+import {
+  getAuditActor,
+} from "../utils/requestAuth";
+
 import {
   normaliseReg,
   normaliseVin,
@@ -41,16 +44,12 @@ const VEHICLE_SOURCES: VehicleSource[] = [
   "EXCEL_IMPORT",
 ];
 
-function getActor(req: Request) {
-  const userIdHeader = req.header("x-user-id");
-  const userId = userIdHeader ? Number(userIdHeader) : null;
-
-  return {
-    changedByUserId:
-      userId && !Number.isNaN(userId) ? userId : null,
-    changedByRole: getRoleFromHeader(req.header("x-user-role")),
-    changedByName: req.header("x-user-name") || null,
-  };
+function getActor(
+  req: Request
+) {
+  return getAuditActor(
+    req
+  );
 }
 
 function isDateString(value: string) {

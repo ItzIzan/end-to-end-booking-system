@@ -8,39 +8,20 @@ import { auditLogsStore } from "../store/auditLogs.store";
 import { customerAccountsStore } from "../store/customerAccounts.store";
 
 import {
-  getRoleFromHeader,
   requireRole,
 } from "../utils/bookingPermissions";
+
+import {
+  getAuditActor,
+  getAuthUser,
+} from "../utils/requestAuth";
 
 function getActor(
   req: Request
 ) {
-  const idHeader =
-    req.header("x-user-id");
-
-  const id = idHeader
-    ? Number(idHeader)
-    : null;
-
-  return {
-    changedByUserId:
-      id &&
-      !Number.isNaN(id)
-        ? id
-        : null,
-
-    changedByRole:
-      getRoleFromHeader(
-        req.header(
-          "x-user-role"
-        )
-      ),
-
-    changedByName:
-      req.header(
-        "x-user-name"
-      ) || null,
-  };
+  return getAuditActor(
+    req
+  );
 }
 
 export const getCustomerAccounts =
@@ -49,11 +30,7 @@ export const getCustomerAccounts =
     res: Response
   ) => {
     const role =
-      getRoleFromHeader(
-        req.header(
-          "x-user-role"
-        )
-      );
+      getAuthUser(req).role;
 
     const check =
       requireRole(
@@ -118,11 +95,7 @@ export const createCustomerAccount =
     res: Response
   ) => {
     const role =
-      getRoleFromHeader(
-        req.header(
-          "x-user-role"
-        )
-      );
+      getAuthUser(req).role;
 
     const check =
       requireRole(
@@ -202,11 +175,7 @@ export const updateCustomerAccount =
     res: Response
   ) => {
     const role =
-      getRoleFromHeader(
-        req.header(
-          "x-user-role"
-        )
-      );
+      getAuthUser(req).role;
 
     const check =
       requireRole(

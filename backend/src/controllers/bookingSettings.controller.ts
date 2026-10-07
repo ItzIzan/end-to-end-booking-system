@@ -2,7 +2,17 @@ import { Request, Response } from "express";
 import { auditLogsStore } from "../store/auditLogs.store";
 import { bookingSettingsStore } from "../store/bookingSettings.store";
 import { bookingsStore } from "../store/bookings.store";
-import { getRoleFromHeader, requireRole } from "../utils/bookingPermissions";
+
+
+import {
+  requireRole,
+} from "../utils/bookingPermissions";
+
+import {
+  getAuditActor,
+  getAuthUser,
+} from "../utils/requestAuth";
+
 import {
   formatDateOnly,
   getEarliestCollectionDate,
@@ -11,15 +21,12 @@ import {
   parseDateOnly,
 } from "../utils/bookingAvailability";
 
-function getActor(req: Request) {
-  const userIdHeader = req.header("x-user-id");
-  const userId = userIdHeader ? Number(userIdHeader) : null;
-
-  return {
-    changedByUserId: userId && !Number.isNaN(userId) ? userId : null,
-    changedByRole: getRoleFromHeader(req.header("x-user-role")),
-    changedByName: req.header("x-user-name") || null,
-  };
+function getActor(
+  req: Request
+) {
+  return getAuditActor(
+    req
+  );
 }
 
 export const getBookingSettings = async (_req: Request, res: Response) => {
@@ -28,14 +35,28 @@ export const getBookingSettings = async (_req: Request, res: Response) => {
 };
 
 export const updateBookingSettings = async (req: Request, res: Response) => {
-  const role = getRoleFromHeader(req.header("x-user-role"));
-  const roleCheck = requireRole(role, ["OPS_ADMIN"]);
+  const user =
+  getAuthUser(req);
 
-  if (!roleCheck.allowed) {
-    return res.status(role ? 403 : 400).json({
-      error: roleCheck.reason,
+const roleCheck =
+  requireRole(
+    user.role,
+    [
+      "OPS_ADMIN",
+    ]
+  );
+
+if (
+  !roleCheck.allowed
+) {
+  return res
+    .status(403)
+    .json({
+      error:
+        roleCheck.reason,
     });
-  }
+}
+
 
   const { processingDays, dailySlotLimit, cutoffHour } = req.body as {
     processingDays?: number;
